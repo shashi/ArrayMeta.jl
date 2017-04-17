@@ -1,87 +1,93 @@
+# constructs Dict
+# Keys:  indexing symbol
+# Value: a list of (array type, dimension, expr) tuples which correspond to that
+#        indexing symbol
+function index_spaces{X<:AbstractArray,Idx}(name, itr::Type{Indexing{X, Idx}})
+    idx_spaces = Dict()
+
+    for (dim, idx) in enumerate(Idx.parameters)
+        j = indexing_expr(name, idx, dim)
+        if isa(j, Symbol)
+            # store mapping from index symbol to "index space" of arrays
+            # being iterated over
+            Base.@get! idx_spaces j []
+            push!(idx_spaces[j], (X, dim, :($name.array)))
+        end
+    end
+
+    idx_spaces
+end
+
+indexing_expr{x}(name, ::Type{IterSym{x}}, i) = x
+indexing_expr{C<:IterConst}(name, ::Type{C}, i) = :($name.idx[$i].val)
+
+function index_spaces{F, X}(name, itr::Type{Map{F, X}})
+    inner = [index_spaces(:($name.arrays[$i]), idx) for (i, idx) in enumerate(X.parameters)]
+    merge_dictofvecs(inner...)
+end
+
+function index_spaces{I,F,T,E}(name, itr::Type{Reduce{I,F,T,E}})
+    index_spaces(:($name.array), T)
+end
+
+function index_spaces{L,R}(name, itr::Type{TensorOp{L,R}})
+    merge_dictofvecs(index_spaces(:($name.lhs), L), index_spaces(:($name.rhs), L))
+end
+
+function index_space_iterator{A<:AbstractArray}(T::Type{A}, dimension, name)
+    :(1:size($name, $dimension))
+end
+
 ### Construction of loop expressions in type domain
 ### This is the fallback implementation for AbstractArrays
 
-index_expr{x}(name, ::Type{IterSym{x}}, i) = x
-index_expr{C<:IterConst}(name, ::Type{C}, i) = :($name.idx[$i].val)
-
-immutable ConsState
-    idx_to_dim::Dict         # used to generate size checks
-    deferred_loops::Vector   # used to defer iterations to outer expression
-end
-ConsState() = ConsState(Dict(), [])
-
-function inner_expr{X, Idx}(name, itr::Type{Iter{X, Idx}}, state)
-    idxs = []
-
-    for (i, idx) in  enumerate(Idx.parameters)
-        j = index_expr(name, idx, i)
-        push!(idxs, j)
-        if isa(j, Symbol)
-            # store mapping from index symbol to dimension of tensor
-            Base.@get! state.idx_to_dim j []
-            push!(state.idx_to_dim[j], (:($name.A), i))
-
-            if !(j in state.deferred_loops)
-                push!(state.deferred_loops, j)
-            end
-        end
-    end
-
-    :($name.A[$(idxs...)])
+function get_subscripts{X,Idx}(name, itr::Type{Indexing{X, Idx}})
+    [indexing_expr(name, idx, i) for (i, idx) in  enumerate(Idx.parameters)]
 end
 
-let
-    X = rand(2,2);
-    testtype(x) = typeof(x.rhs)
-    state = ConsState()
-    @test inner_expr(:X, testtype(@lower(X[i,j,k] = X[i,j,k])), ConsState())|>string == :(X.A[i,j,k])|>string
-    @test inner_expr(:X, testtype(@lower(X[i,j,1] = X[i,j,1])), ConsState())|>string == :(X.A[i,j,X.idx[3].val])|>string
+# Generate the expression corresponding to a type
+function kernel_expr(name, itr)
+    kernel_expr(name, arraytype(itr), itr)
 end
 
-function inner_expr{F, Ts}(name, itr::Type{Map{F, Ts}}, state)
-    innerexprs = [inner_expr(:($name.Xs[$i]), T, state) for (i, T) in enumerate(Ts.parameters)]
-    :($name.f($(innerexprs...)))
+function kernel_expr{X, Idx, A<:AbstractArray}(name, ::Type{A},
+                                               itr::Type{Indexing{X, Idx}})
+    idx = get_subscripts(name, itr)
+    :($name.array[$(idx...)])
 end
 
-let
-    X = rand(2,2);
-    Y = rand(2,2);
-    testtype(x) = typeof(x.rhs)
-    state = ConsState()
-    @test inner_expr(:X, testtype(@lower(X[i,j,k] = -Y[i,j,k])), ConsState())|>string == :(X.f(X.Xs[1].A[i,j,k]))|>string
-    @test inner_expr(:X, testtype(@lower(X[i,j,k] = X[i,k,j]-Y[i,j,k])), ConsState())|>string == :(X.f(X.Xs[1].A[i,k,j], X.Xs[2].A[i,j,k]))|>string
+function kernel_expr{A<:AbstractArray, F, Ts}(name, ::Type{A},
+                                              itr::Type{Map{F, Ts}},
+                                              spaces=index_spaces(name, itr))
+
+    inner_kernels = [kernel_expr(:($name.arrays[$i]), arraytype(T), T)
+                        for (i, T) in enumerate(Ts.parameters)]
+
+    :($name.f($(inner_kernels...)))
 end
 
-function inner_expr{idx, F, T, E}(name, itr::Type{Reduce{IterSym{idx}, F, T, E}}, state)
-    inner = inner_expr(:($name.X), T, state)
-    !haskey(state.idx_to_dim, idx) && throw(ArgumentError("Reduced dimension $idx unknown"))
-    dim = first(state.idx_to_dim[idx])
+function kernel_expr{A <: AbstractArray, idx, F, T, E}(name, ::Type{A},
+                                   itr::Type{Reduce{IterSym{idx}, F, T, E}},
+                                   spaces=index_spaces(name, itr))
+
+    inner = kernel_expr(:($name.array), arraytype(T), T, spaces)
+    !haskey(spaces, idx) && throw(ArgumentError("Reduced dimension $idx unknown"))
+    iter = index_space_iterator(first(spaces[idx])...)
     quote
-        let $idx = 1, acc = $inner
-            for $idx = 2:size($(dim...))
-                acc = $name.f(acc, $inner)
+        let tmp = start($iter)
+            if done($iter, tmp)  # 0 elements in this dimension
+                acc = $name.empty # use default value
+            else
+                $idx, tmp = next($iter, tmp) # skip first
+                acc = $inner
             end
-            acc
+            while !done($iter, tmp)
+                $idx, tmp = next($iter, tmp)
+                acc = $name.f(acc, $inner) # accumulate with f
+            end
+            acc # return accumulated value
         end
     end
-end
-
-import MacroTools: striplines
-let
-    X = rand(2,2);
-    Y = rand(2,2);
-    testtype(x) = typeof(x.rhs)
-    state = ConsState()
-    tex = quote
-            let k = 1, acc = X.X.f(X.X.Xs[1].A[i,j,k])
-                  for k = 2:size(X.X.Xs[1].A,3)
-                      acc = X.f(acc,X.X.f(X.X.Xs[1].A[i,j,k]))
-                  end
-                  acc
-              end
-          end|>striplines
-
-    @test inner_expr(:X, testtype(@lower(X[i,j] = -Y[i,j,k])), ConsState())|>striplines|>string  == string(tex)
 end
 
 allequal(x) = true
@@ -89,49 +95,35 @@ function allequal(x, xs...)
     x == xs[1] && allequal(xs...)
 end
 
+function tensorop_body{A<:AbstractArray, L,R}(name, ::Type{A}, op::Type{TensorOp{L,R}})
+    lhs_inner = kernel_expr(:($name.lhs), L)
+    rhs_inner = kernel_expr(:($name.rhs), R)
 
-function tensorop_body{L,R}(name, top::Type{TensorOp{L,R}})
-    state = ConsState()
-    rhs_inner = inner_expr(:($name.rhs), R, state)
-    lhs_inner = inner_expr(:($name.lhs), L, state)
+    lspaces = index_spaces(:($name.lhs), L)
 
-    # wrap with loops
     expr = :($lhs_inner = $rhs_inner)
     checks = :()
-    for sym in reverse(state.deferred_loops)
-        if !haskey(state.idx_to_dim, sym)
-            throw(ArgumentError("Unknown dimension $sym"))
-        end
-        dims = state.idx_to_dim[sym]
-        if length(dims) > 1
+    for (sym, spaces) in lspaces
+        if length(spaces) > 1
             # check dimensions for equality
-            equal_dims = [:(size($(d...))) for d in dims]
+            equal_dims = [:(size($(d[3]), $(d[2]))) for d in spaces]
             checks = :($checks; @assert allequal($(equal_dims...),))
         end
-        dim = first(dims)
+        T,dim,nm = first(spaces)
         expr = quote
-            for $sym = 1:size($(dim...))
+            for $sym = 1:size($nm, $dim)
                 $expr
             end
         end
     end
-    :($checks; $expr; $name.lhs.A)
+    :($checks; $expr; $name.lhs.array)
 end
 
-@inline @generated function top!(t::TensorOp)
-    tensorop_body(:t, t)
+@inline function tensorop!{L,R}(t::TensorOp{L,R})
+    tensorop!(arraytype(L), t)
 end
 
-"""
-`top!(t::TensorOp)`
-
-Perform a tensor operation
-"""
-macro top(expr, reductions=:nothing)
-    :(top!(@lower $expr $reductions))
+@inline @generated function tensorop!{L,R,A<:AbstractArray}(::Type{A}, t::TensorOp{L,R})
+    tensorop_body(:t, arraytype(L), t)
 end
 
-let
-    A=rand(2,2); B=rand(2,2); C=rand(2,2);
-    @test @top(A[i,j]=B[i,k]*C[k,j]) == B*C
-end

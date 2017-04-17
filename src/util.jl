@@ -1,8 +1,7 @@
 import Base: @pure
 
-car(x::Pair) = x.first
-cdr(x::Pair) = x.second
 flatten(xs) = reduce(vcat, vec.(xs))
+
 function indicesinvolved(expr)
     @match expr begin
         A_[idx__] => [(A => idx)]
@@ -11,22 +10,6 @@ function indicesinvolved(expr)
     end
 end
 
-let
-    @test indicesinvolved(:(A[i,j,k])) == [:A=>Any[:i,:j,:k]]
-    @test indicesinvolved(:(A[i,j,k]+B[x,y,z])) == [:A=>Any[:i,:j,:k], :B=>[:x,:y,:z]]
-    @test indicesinvolved(:(A[i,j,k] |> f)) == [:A=>Any[:i,:j,:k]]
-end
-
-function index_dim_map(xs)
-    iters = Dict()
-    for (tensor, idxs) in xs
-        for (i, idx) in enumerate(idxs)
-            dims = Base.@get! iters idx []
-            push!(dims, (tensor, i))
-        end
-    end
-    iters
-end
 
 """
 Type Domain `promote_op`
@@ -68,15 +51,23 @@ end
 end
 
 """
-`promote_arraytype{C}(::Type{F}, ::Type{C}...)`
-Given a function type and types of containers with elements being mapped
-figure out the output container type.
+Type Domain `promote_op`
+
+The first argument is the type of the function
 """
-@pure function promote_arraytype{F,T<:Tuple}(::Type{F}, ::Type{T})
-    promote_arraytype(F, map(arraytype, T.parameters)...)
+@pure @generated function promote_op_t{F,T}(::Type{F}, ::Type{T})
+    :(_promote_op_t(F, $(T.parameters...)))
 end
 
+"""
+`promote_arraytype(F::Type, Ts::Type...)`
+
+Returns an output array type for the result of applying a function of type `F`
+on arrays of type `Ts`.
+"""
+
 @pure function promote_arraytype{F}(::Type{F}, T...)
+    length(T) == 1 && return T[1]
     promote_arraytype(F, promote_arraytype(F, T[1]), T[2:end]...)
 end
 
@@ -104,22 +95,26 @@ end
 end
 
 """
-`reduce_identity(f, T::Type)`
+`reduction_identity(f, T::Type)`
 
 Identity value for reducing a collection of `T` with function `f`
 """
-reduce_identity{T}(f::Union{typeof(+), typeof(-)}, ::Type{T}) = zero(T)
-reduce_identity{T}(f::typeof(min), ::Type{T}) = typemax(T)
-reduce_identity{T}(f::typeof(max), ::Type{T}) = typemin(T)
-reduce_identity{T}(f::typeof(*), ::Type{T}) = one(T)
-reduce_identity{T}(f::typeof(push!), ::Type{T}) = T[]
-#=
+reduction_identity{T}(f::Union{typeof(+), typeof(-)}, ::Type{T}) = zero(T)
+reduction_identity{T}(f::typeof(min), ::Type{T}) = typemax(T)
+reduction_identity{T}(f::typeof(max), ::Type{T}) = typemin(T)
+reduction_identity{T}(f::typeof(*), ::Type{T}) = one(T)
+reduction_identity{T}(f::typeof(push!), ::Type{T}) = T[]
 
-    # TODO
-
-    - Allocate automatically!!!
-    - Make sure we can generate different code for different array type combiniations
-    - Use this to generate code for sparse matrices
-    - Use the same to generate code for DArray
-
-=#
+function merge_dictofvecs(dicts...)
+    merged_dict = Dict()
+    for dict in dicts
+        for (k, v) in dict
+            if k in keys(merged_dict)
+                merged_dict[k] = vcat(merged_dict[k], v)
+            else
+                merged_dict[k] = v
+            end
+        end
+    end
+    merged_dict
+end

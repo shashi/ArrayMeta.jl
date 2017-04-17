@@ -1,7 +1,6 @@
 module ArrayMeta
 
 using MacroTools
-using Base.Test
 
 include("util.jl")
 include("lowering.jl")
