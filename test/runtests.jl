@@ -32,19 +32,19 @@ end
     A = rand(2,2); B = rand(2,2); C = rand(2,2);
     i, j, k = [IterSym{x}() for x in [:i,:j,:k]]
     # map
-    @test @lower(A[i,j] = B[i,j]) == TensorOp(Indexing(A, (i, j)), Indexing(B, (i, j)))
+    @test @lower(A[i,j] = B[i,j]) == ArrayOp(Indexing(A, (i, j)), Indexing(B, (i, j)))
 
     # transpose
-    @test @lower(A[i,j] = B[j,i]) == TensorOp(Indexing(A, (i, j)), Indexing(B, (j, i)))
+    @test @lower(A[i,j] = B[j,i]) == ArrayOp(Indexing(A, (i, j)), Indexing(B, (j, i)))
 
     # reduced over i:
-    @test @lower(A[j] = B[j,i])   == TensorOp(Indexing(A, (j,)), Reduce(i, +, Indexing(B, (j, i))))
+    @test @lower(A[j] = B[j,i])   == ArrayOp(Indexing(A, (j,)), Reduce(i, +, Indexing(B, (j, i))))
 
     # reduced over i, output is reducedim
-    @test @lower(A[1,j] = B[i,j]) == TensorOp(Indexing(A, (IterConst{Int}(1), j)), Reduce(i, +, Indexing(B, (i, j))))
+    @test @lower(A[1,j] = B[i,j]) == ArrayOp(Indexing(A, (IterConst{Int}(1), j)), Reduce(i, +, Indexing(B, (i, j))))
 
     # reduce both dimensions, use * to reduce i and + to reduce j
-    @test @lower(A[1,1] = B[i,j], [i=>*,j=>+]) == TensorOp(Indexing(A, (IterConst{Int}(1), IterConst{Int}(1))),
+    @test @lower(A[1,1] = B[i,j], [i=>*,j=>+]) == ArrayOp(Indexing(A, (IterConst{Int}(1), IterConst{Int}(1))),
                                                            Reduce(j, +, Reduce(i, *, Indexing(B, (i, j)))))
 end
 
@@ -108,11 +108,11 @@ import MacroTools: striplines
 end
 
 using Dagger
-@testset "@tensorop" begin
+@testset "@arrayop" begin
     @testset "abstract array" begin
 
         A=rand(2,2); B=rand(2,2); C=rand(2,2);
-        @test @tensorop(A[i,j]=B[i,k]*C[k,j]) == B*C
+        @test @arrayop(A[i,j]=B[i,k]*C[k,j]) == B*C
 
     end
 
@@ -125,7 +125,7 @@ using Dagger
         A,B,C = map(compute, [A,B,C])
         D = map(identity, A)
         D = compute(D)
-        @tensorop A[i,j] = B[i,k]*C[k,j]
+        @arrayop A[i,j] = B[i,k]*C[k,j]
         @test gather(A) ≈ gather(B)*gather(C)
     end
 

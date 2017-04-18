@@ -30,7 +30,7 @@ function index_spaces{I,F,T,E}(name, itr::Type{Reduce{I,F,T,E}})
     index_spaces(:($name.array), T)
 end
 
-function index_spaces{L,R}(name, itr::Type{TensorOp{L,R}})
+function index_spaces{L,R}(name, itr::Type{ArrayOp{L,R}})
     merge_dictofvecs(index_spaces(:($name.lhs), L), index_spaces(:($name.rhs), L))
 end
 
@@ -95,7 +95,7 @@ function allequal(x, xs...)
     x == xs[1] && allequal(xs...)
 end
 
-function tensorop_body{A<:AbstractArray, L,R}(name, ::Type{A}, op::Type{TensorOp{L,R}})
+function arrayop_body{A<:AbstractArray, L,R}(name, ::Type{A}, op::Type{ArrayOp{L,R}})
     lhs_inner = kernel_expr(:($name.lhs), L)
     rhs_inner = kernel_expr(:($name.rhs), R)
 
@@ -119,11 +119,11 @@ function tensorop_body{A<:AbstractArray, L,R}(name, ::Type{A}, op::Type{TensorOp
     :($checks; $expr; $name.lhs.array)
 end
 
-@inline function tensorop!{L,R}(t::TensorOp{L,R})
-    tensorop!(arraytype(L), t)
+@inline function arrayop!{L,R}(t::ArrayOp{L,R})
+    arrayop!(arraytype(L), t)
 end
 
-@inline @generated function tensorop!{L,R,A<:AbstractArray}(::Type{A}, t::TensorOp{L,R})
-    tensorop_body(:t, arraytype(L), t)
+@inline @generated function arrayop!{L,R,A<:AbstractArray}(::Type{A}, t::ArrayOp{L,R})
+    arrayop_body(:t, arraytype(L), t)
 end
 

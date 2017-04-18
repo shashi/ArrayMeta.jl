@@ -35,14 +35,14 @@ function onchunks{dim}(X::Reduce{dim})
     end
 end
 
-function onchunks(itr::TensorOp)
-    TensorOp(onchunks(itr.lhs), onchunks(itr.rhs))
+function onchunks(itr::ArrayOp)
+    ArrayOp(onchunks(itr.lhs), onchunks(itr.rhs))
 end
 
-function tensorop!{D<:DaggerArray}(::Type{D}, t::TensorOp)
-    cs = tensorop!(onchunks(t))
+function arrayop!{D<:DaggerArray}(::Type{D}, t::ArrayOp)
+    cs = arrayop!(onchunks(t))
     L(x) = Indexing(x, t.lhs.idx)
-    chunksA = map(delayed(x -> tensorop!(TensorOp(L(Array(Float64, 2,2)), x))), cs)
+    chunksA = map(delayed(x -> arrayop!(ArrayOp(L(Array(Float64, 2,2)), x))), cs)
     t.lhs.array.result.chunks = chunksA
     t.lhs.array
 end

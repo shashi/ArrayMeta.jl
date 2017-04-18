@@ -78,12 +78,12 @@ end
 @pure arraytype{idx,F,T,E}(::Type{Reduce{idx, F, T, E}}) = arraytype(T)
 
 """
-`TensorOp(lhs, rhs)`
+`ArrayOp(lhs, rhs)`
 
 represents a tensor operation. `lhs` is an `Indexing` representing the LHS of the tensor expression
 `rhs` isa `Union{Indexing, Map, Reduce}`
 """
-immutable TensorOp{L<:Indexing,R}
+immutable ArrayOp{L<:Indexing,R}
     lhs::L
     rhs::R
 end
@@ -141,7 +141,7 @@ function lower(expr, reductions)
         :(Reduce($(lower_index(idx, true)), $(get(reduce_dict, idx, +)), $ex))
     end
 
-    :(TensorOp($(lower_indexing_and_maps(lhs)), $rhs_lowered))
+    :(ArrayOp($(lower_indexing_and_maps(lhs)), $rhs_lowered))
 end
 
 macro lower(expr, reductions=0)
@@ -149,10 +149,10 @@ macro lower(expr, reductions=0)
 end
 
 """
-`tensorop!(t::TensorOp)`
+`arrayop!(t::ArrayOp)`
 
 Perform a tensor operation
 """
-macro tensorop(expr, reductions=0)
-    :(tensorop!(@lower $expr $reductions))
+macro arrayop(expr, reductions=0)
+    :(arrayop!(@lower $expr $reductions))
 end
