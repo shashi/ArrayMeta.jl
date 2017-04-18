@@ -65,7 +65,6 @@ end
 Returns an output array type for the result of applying a function of type `F`
 on arrays of type `Ts`.
 """
-
 @pure function promote_arraytype{F}(::Type{F}, T...)
     length(T) == 1 && return T[1]
     promote_arraytype(F, promote_arraytype(F, T[1]), T[2:end]...)

@@ -22,7 +22,7 @@ end
     map2 = Map(/, (ConstArg(1), itr1))
     @test eltype(typeof(map1)) == Float64
     @test eltype(typeof(map2)) == Float64
-    @test arraytype(typeof(map1)) == Array{Float64,1}
+    @test arraytype(typeof(map1)) <: Array
 end
 
 @testset "Reduce" begin
@@ -116,25 +116,95 @@ end
 
 using Dagger
 import ArrayMeta: @arrayop
+
 @testset "@arrayop" begin
-    @testset "abstract array" begin
+    X = convert(Array, reshape(1:12, 4,3))
 
-        A=rand(2,2); B=rand(2,2); C=rand(2,2);
-        @test @arrayop(A[i,j]=B[i,k]*C[k,j]) == B*C
+    Y = ones(3,4)
 
-    end
+    # copy
+    @test @arrayop(_[i,j] := X[i,j]) == X
 
-    @testset "dagger" begin
+    # transpose
+    @test @arrayop(_[i,j] := X[j,i]) == X'
 
-        A = rand(Blocks(2,2), 4,4)
-        B = rand(Blocks(2,2), 4,4)
-        C = rand(Blocks(2,2), 4,4)
+    # elementwise 1-arg
+    @test @arrayop(_[i,j] := -X[i,j]) == -X
 
-        A,B,C = map(compute, [A,B,C])
-        D = map(identity, A)
-        D = compute(D)
-        @arrayop A[i,j] = B[i,k]*C[k,j]
-        @test gather(A) ≈ gather(B)*gather(C)
-    end
+    # elementwise 2-args
+    @test @arrayop(_[i,j] := X[i,j] + Y[j,i]) == X + Y'
 
+    # elementwise with const
+    #@test @arrayop(_[] := 2 * X[i,j])[] == sum(2.*X)
+
+    # reduce default (+)
+    @test @arrayop(_[] := X[i,j])[] == sum(X)
+
+    # reduce with function
+    @test @arrayop(_[] := X[i,j], [i=>*, j=>*])[] == prod(X)
+
+    # reducedim default (+)
+    @test @arrayop(_[1, j] := X[i,j]) == sum(X, 1)
+    @test @arrayop(_[i, 1] := X[i,j]) == sum(X, 2)
+
+    # reducedim with function
+    @test @arrayop(_[1, j] := X[i,j], (i=>*,)) == prod(X, 1)
+
+    # broadcast
+    y = [1, 2, 3, 4]
+    @test @arrayop(_[i, j] := X[i, j] + y[i]) == X .+ y
+    y = [1 2 3]
+    @test @arrayop(_[i, j] := X[i, j] + y[j]) == X .+ y
+
+    # matmul
+    @test @arrayop(_[i, j] := X[i,k] * Y[k,j]) == X*Y
+end
+
+Base.:(==)(a::ArrayMeta.DArray, b::Array) = gather(a) == b
+
+@testset "@arrayop - Dagger" begin
+    X = convert(Array, reshape(1:16, 4,4))
+    dX = compute(Distribute(Blocks(2,2), X))
+
+    Y = ones(4,4)
+    dY = compute(compute(Distribute(Blocks(2,2), Y))')
+
+    # copy
+    @test @arrayop(_[i,j] := dX[i,j]) == X
+
+    # transpose
+    @test @arrayop(_[i,j] := dX[j,i]) == X'
+
+    # elementwise 1-arg
+    @test @arrayop(_[i,j] := -dX[i,j]) == -X
+
+    # elementwise 2-args
+    @test @arrayop(_[i,j] := dX[i,j] + dY[j,i]) == X + Y'
+
+    # elementwise with const
+    #@test @arrayop(_[] := 2 * X[i,j])[] == sum(2.*X)
+
+    # reduce default (+)
+    @test gather(@arrayop(_[1,1] := dX[i,j])) |> first == sum(X)
+
+    # reduce with function
+    @test gather(@arrayop(_[1,1] := dX[i,j], [i=>*, j=>*])) |> first == prod(X)
+
+    # reducedim default (+)
+    @test @arrayop(_[1, j] := dX[i,j]) == sum(X, 1)
+    @test @arrayop(_[i, 1] := dX[i,j]) == sum(X, 2)
+
+    # reducedim with function
+    @test @arrayop(_[1, j] := dX[i,j], (i=>*,)) == prod(X, 1)
+
+    # broadcast
+    y = [1, 2, 3, 4]
+    dy = compute(Distribute(Blocks(2), y))
+    @test @arrayop(_[i, j] := dX[i, j] + dy[i]) == X .+ y
+    y = [1 2 3 4]
+    dy = compute(Distribute(Blocks(1,2), y))
+    @test @arrayop(_[i, j] := dX[i, j] + dy[j]) == X .+ y
+
+    # matmul
+    @test @arrayop(_[i, j] := dX[i,k] * dY[k,j]) == X*Y
 end

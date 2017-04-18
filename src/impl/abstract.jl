@@ -22,7 +22,8 @@ indexing_expr{x}(name, ::Type{IterSym{x}}, i) = x
 indexing_expr{C<:IterConst}(name, ::Type{C}, i) = :($name.idx[$i].val)
 
 function index_spaces{F, X}(name, itr::Type{Map{F, X}})
-    inner = [index_spaces(:($name.arrays[$i]), idx) for (i, idx) in enumerate(X.parameters)]
+    inner = [index_spaces(:($name.arrays[$i]), idx)
+             for (i, idx) in enumerate(X.parameters)]
     merge_dictofvecs(inner...)
 end
 
@@ -51,7 +52,8 @@ function kernel_expr(name, itr)
 end
 
 function kernel_expr{X, Idx, A<:AbstractArray}(name, ::Type{A},
-                                               itr::Type{Indexing{X, Idx}})
+                                               itr::Type{Indexing{X, Idx}},
+                                               spaces=index_spaces(name, itr))
     idx = get_subscripts(name, itr)
     :($name.array[$(idx...)])
 end
@@ -66,7 +68,7 @@ function kernel_expr{A<:AbstractArray, F, Ts}(name, ::Type{A},
     :($name.f($(inner_kernels...)))
 end
 
-function kernel_expr{A <: AbstractArray, idx, F, T, E}(name, ::Type{A},
+function kernel_expr{A <: Array, idx, F, T, E}(name, ::Type{A},
                                    itr::Type{Reduce{IterSym{idx}, F, T, E}},
                                    spaces=index_spaces(name, itr))
 
@@ -123,3 +125,33 @@ end
     arrayop_body(:t, arraytype(L), t)
 end
 
+# Kind of a hack,
+# this method is the allocating version of arrayop!
+@inline @generated function arrayop!{var, L,R}(::Type{AllocVar{var}}, t::ArrayOp{L,R})
+    rspaces = index_spaces(:(t.rhs), R)
+
+    dims = Any[]
+    for (i, k) in enumerate(L.parameters[2].parameters)
+        if k <: IterSym
+            sym = k.parameters[1]
+
+            if !haskey(rspaces, sym)
+                error("Could not figure out output dimension for symbol $sym.")
+            end
+
+            dim = first(rspaces[sym])
+            dimsz = :(indices($(dim[3]), $(dim[2])))
+            push!(dims, dimsz)
+        else
+            push!(dims, :(indices($(indexing_expr(:(t.lhs), k, i)), 1)))
+        end
+    end
+    lhs = :(ArrayMeta.allocarray($(arraytype(R)), $(dims...)))
+    quote
+        arrayop!(ArrayMeta.ArrayOp(Indexing($lhs, t.lhs.idx), t.rhs))
+    end
+end
+
+function allocarray{T,N}(::Type{Array{T,N}}, sz...)
+    similar(Array{T}, sz...)
+end

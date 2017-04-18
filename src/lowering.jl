@@ -1,5 +1,7 @@
 ### Lowering
 
+export @lower, @arrayop
+
 import Base: eltype
 
 """
@@ -46,7 +48,8 @@ end
 end
 
 @pure function arraytype{F,Ts}(::Type{Map{F, Ts}})
-    promote_arraytype(F, map(arraytype, Ts.parameters)...)
+    #promote_arraytype(F, map(arraytype, Ts.parameters)...)
+    arraytype(Ts.parameters[1])
 end
 
 # A constant argument to Map
@@ -70,7 +73,8 @@ immutable Reduce{idx<:IterSym, F, T, E}
     empty::E
 end
 
-function Reduce{I<:IterSym,F,T}(dim::I, f::F, array::T, empty=reduction_identity(f, eltype(T)))
+function Reduce{I<:IterSym,F,T}(dim::I, f::F, array::T,
+                                empty=reduction_identity(f, eltype(T)))
     Reduce{I,F,T, typeof(empty)}(f,array,empty)
 end
 
@@ -95,17 +99,25 @@ function lower_index(idx, only_symbols=false)
         if only_symbols
             throw(ArgumentError("Got $idx instead of a symbol"))
         end
-        :(IterConst($idx))
+        :(ArrayMeta.IterConst($idx))
     end
 end
 
 # lower Indexing and Maps
 function lower_indexing_and_maps(expr)
     @match expr begin
-        A_[idx__] => :(Indexing($A, ($(map(lower_index, idx)...),)))
-        f_(arg_)   => :(Map($f, ($(lower_indexing_and_maps(arg)),)))
-        f_(args__)  => :(Map($f, ($(reduce(vcat, [lower_indexing_and_maps(x) for x in args])...),)))
-        x_ => :(ConstArg($x))
+        A_[idx__] => :(ArrayMeta.Indexing($A, ($(map(lower_index, idx)...),)))
+        f_(arg_)   => :(ArrayMeta.Map($f, ($(lower_indexing_and_maps(arg)),)))
+        f_(args__)  => :(ArrayMeta.Map($f, ($(reduce(vcat, [lower_indexing_and_maps(x) for x in args])...),)))
+        x_ => :(ArrayMeta.ConstArg($x))
+    end
+end
+
+immutable AllocVar{sym} end # the output variable name
+function lower_alloc_indexing(expr)
+    @match expr begin
+        A_[idx__] => :(ArrayMeta.Indexing(ArrayMeta.AllocVar{$(Expr(:quote, A))}(), ($(map(lower_index, idx)...),)))
+        x_ => :(ArrayMeta.ConstArg($x))
     end
 end
 
@@ -113,6 +125,7 @@ end
 function reduction_functions(reductions)
     @match reductions begin
         (i_=>f_) => Dict(i => f)
+        (R__,) => reduce(merge, map(reduction_functions, R))
         [R__] => reduce(merge, map(reduction_functions, R))
         0 => Dict()
         _ => error("Invalid reduction spec")
@@ -120,8 +133,9 @@ function reduction_functions(reductions)
 end
 
 function lower(expr, reductions)
-    lhs, rhs = @match expr begin
-        (lhs_ = rhs_) => lhs, rhs
+    lhs, rhs, alloc = @match expr begin
+        (lhs_ = rhs_) => lhs, rhs, false
+        (lhs_ := rhs_) => lhs, rhs, true
         _ => error("Expression is not of the form LHS = RHS")
     end
     lidxs = indicesinvolved(lhs)
@@ -137,10 +151,14 @@ function lower(expr, reductions)
 
     # lower reduces
     rhs_lowered = reduce(lowered_maps, reduceddims) do ex, idx
-        :(Reduce($(lower_index(idx, true)), $(get(reduce_dict, idx, +)), $ex))
+        :(ArrayMeta.Reduce($(lower_index(idx, true)), $(get(reduce_dict, idx, +)), $ex))
     end
 
-    :(ArrayOp($(lower_indexing_and_maps(lhs)), $rhs_lowered))
+    if alloc
+        :(ArrayMeta.ArrayOp($(lower_alloc_indexing(lhs)), $rhs_lowered))
+    else
+        :(ArrayMeta.ArrayOp($(lower_indexing_and_maps(lhs)), $rhs_lowered))
+    end
 end
 
 macro lower(expr, reductions=0)
@@ -153,7 +171,7 @@ end
 Perform a tensor operation
 """
 macro arrayop(expr, reductions=0)
-    :(ArrayMeta.arrayop!(@lower $expr $reductions)) |> esc
+    :(ArrayMeta.arrayop!($(lower(expr, reductions)))) |> esc
 end
 
 @inline function arrayop!{L,R}(t::ArrayOp{L,R})
