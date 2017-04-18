@@ -111,7 +111,6 @@ end
 
 # Get a Dictionary of reduction functions
 function reduction_functions(reductions)
-    @show reductions
     @match reductions begin
         (i_=>f_) => Dict(i => f)
         [R__] => reduce(merge, map(reduction_functions, R))
@@ -145,7 +144,7 @@ function lower(expr, reductions)
 end
 
 macro lower(expr, reductions=0)
-    lower(expr, reductions)
+    lower(expr, reductions) |> esc
 end
 
 """
@@ -154,5 +153,9 @@ end
 Perform a tensor operation
 """
 macro arrayop(expr, reductions=0)
-    :(arrayop!(@lower $expr $reductions))
+    :(ArrayMeta.arrayop!(@lower $expr $reductions)) |> esc
+end
+
+@inline function arrayop!{L,R}(t::ArrayOp{L,R})
+    arrayop!(arraytype(L), t)
 end

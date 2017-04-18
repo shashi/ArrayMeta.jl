@@ -119,10 +119,6 @@ function arrayop_body{A<:AbstractArray, L,R}(name, ::Type{A}, op::Type{ArrayOp{L
     :($checks; $expr; $name.lhs.array)
 end
 
-@inline function arrayop!{L,R}(t::ArrayOp{L,R})
-    arrayop!(arraytype(L), t)
-end
-
 @inline @generated function arrayop!{L,R,A<:AbstractArray}(::Type{A}, t::ArrayOp{L,R})
     arrayop_body(:t, arraytype(L), t)
 end

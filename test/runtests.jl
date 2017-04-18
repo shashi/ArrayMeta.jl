@@ -1,12 +1,14 @@
 using ArrayMeta
 using Base.Test
 
+import ArrayMeta: indicesinvolved
 @testset "utilities" begin
     @test indicesinvolved(:(A[i,j,k])) == [:A=>Any[:i,:j,:k]]
     @test indicesinvolved(:(A[i,j,k]+B[x,y,z])) == [:A=>Any[:i,:j,:k], :B=>[:x,:y,:z]]
     @test indicesinvolved(:(A[i,j,k] |> f)) == [:A=>Any[:i,:j,:k]]
 end
 
+import ArrayMeta: Indexing,Map,Reduce,IterSym,IterConst, arraytype, ConstArg
 @testset "Indexing" begin
     itr = Indexing([1], (IterSym{:i}(),))
     @test eltype(typeof(itr)) == Int64
@@ -28,6 +30,8 @@ end
     @test eltype(Reduce(IterSym{:i}(), push!, itr1, Int[])) == Array{Int,1}
 end
 
+import ArrayMeta: @lower, ArrayOp
+
 @testset "Lower" begin
     A = rand(2,2); B = rand(2,2); C = rand(2,2);
     i, j, k = [IterSym{x}() for x in [:i,:j,:k]]
@@ -48,6 +52,7 @@ end
                                                            Reduce(j, +, Reduce(i, *, Indexing(B, (i, j)))))
 end
 
+import ArrayMeta: index_spaces
 @testset "indexspaces" begin
     i,j,k=IterSym{:i}(), IterSym{:j}(), IterSym{:k}()
     itr = Indexing(rand(10,10), (i,j))
@@ -68,6 +73,8 @@ end
 end
 
 import MacroTools: striplines
+import ArrayMeta: kernel_expr
+
 @testset "kernel_expr" begin
     @testset "Indexing" begin
         X = rand(2,2);
@@ -89,13 +96,13 @@ import MacroTools: striplines
         testtype(x) = typeof(x.rhs)
         tex = quote
                   let tmp = start(1:size(X.array.arrays[1].array, 3))
-                      if done(1:size(X.array.arrays[1].array, 3), k)
+                      if done(1:size(X.array.arrays[1].array, 3), tmp)
                           acc = X.empty
                       else
                           (k, tmp) = next(1:size(X.array.arrays[1].array, 3), tmp)
                           acc = X.array.f(X.array.arrays[1].array[i, j, k])
                       end
-                      while !(done(1:size(X.array.arrays[1].array, 3), k))
+                      while !(done(1:size(X.array.arrays[1].array, 3), tmp))
                           (k, tmp) = next(1:size(X.array.arrays[1].array, 3), tmp)
                           acc = X.f(acc, X.array.f(X.array.arrays[1].array[i, j, k]))
                       end
@@ -108,6 +115,7 @@ import MacroTools: striplines
 end
 
 using Dagger
+import ArrayMeta: @arrayop
 @testset "@arrayop" begin
     @testset "abstract array" begin
 
