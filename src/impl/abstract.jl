@@ -68,24 +68,24 @@ function kernel_expr{A<:AbstractArray, F, Ts}(name, ::Type{A},
     :($name.f($(inner_kernels...)))
 end
 
-function kernel_expr{A <: Array, idx, F, T, E}(name, ::Type{A},
+function kernel_expr{A <: AbstractArray, idx, F, T, E}(name, ::Type{A},
                                    itr::Type{Reduce{IndexSym{idx}, F, T, E}},
                                    spaces=index_spaces(name, itr))
 
     inner = kernel_expr(:($name.array), arraytype(T), T, spaces)
     !haskey(spaces, idx) && throw(ArgumentError("Reduced dimension $idx unknown"))
-    iter = index_space_iterator(first(spaces[idx])...)
+    #iter = index_space_iterator(first(spaces[idx])...)
+    iter = Symbol("$(idx)_range")
     quote
         let tmp = start($iter)
-            if done($iter, tmp)  # 0 elements in this dimension
+            if isempty($iter)
                 acc = $name.empty # use default value
             else
-                $idx, tmp = next($iter, tmp) # skip first
+                $idx = first($iter)
                 acc = $inner
-            end
-            while !done($iter, tmp)
-                $idx, tmp = next($iter, tmp)
-                acc = $name.f(acc, $inner) # accumulate with f
+                for $idx in $iter[2:end]
+                    acc = $name.f(acc, $inner) # accumulate with f
+                end
             end
             acc # return accumulated value
         end
@@ -102,9 +102,11 @@ function arrayop_body{A<:AbstractArray, L,R}(name, ::Type{A}, op::Type{ArrayOp{L
     rhs_inner = kernel_expr(:($name.rhs), R)
 
     lspaces = index_spaces(:($name.lhs), L)
+    rspaces = index_spaces(:($name.rhs), R)
 
     expr = :($lhs_inner = $rhs_inner)
     checks = :()
+    input_ranges = Any[]
     for (sym, spaces) in lspaces
         if length(spaces) > 1
             # check dimensions for equality
@@ -112,13 +114,27 @@ function arrayop_body{A<:AbstractArray, L,R}(name, ::Type{A}, op::Type{ArrayOp{L
             checks = :($checks; @assert allequal($(equal_dims...),))
         end
         T,dim,nm = first(spaces)
+        sym_range = Symbol("$(sym)_range")
+        push!(input_ranges, sym_range => :(1:size($nm, $dim)))
         expr = quote
-            for $sym = 1:size($nm, $dim)
+            for $sym in $sym_range
                 $expr
             end
         end
     end
-    :($checks; $expr; $name.lhs.array)
+
+    reduced_dims = setdiff(keys(rspaces), keys(lspaces))
+    for sym in reduced_dims
+        spaces = rspaces[sym]
+        T,dim,nm = first(spaces)
+        push!(input_ranges, Symbol("$(sym)_range") => :(1:size($nm, $dim)))
+    end
+    fn = gensym("arrayop")
+    expr = :(function $fn($name, $(map(first, input_ranges)...))
+                $expr
+             end)
+
+    :($checks; $expr; $fn($name, $(map(last, input_ranges)...)); $name.lhs.array)
 end
 
 @inline @generated function arrayop!{L,R,A<:AbstractArray}(::Type{A}, t::ArrayOp{L,R})

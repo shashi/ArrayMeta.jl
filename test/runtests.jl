@@ -95,20 +95,19 @@ import ArrayMeta: kernel_expr
         Y = rand(2,2);
         testtype(x) = typeof(x.rhs)
         tex = quote
-                  let tmp = start(1:size(X.array.arrays[1].array, 3))
-                      if done(1:size(X.array.arrays[1].array, 3), tmp)
-                          acc = X.empty
-                      else
-                          (k, tmp) = next(1:size(X.array.arrays[1].array, 3), tmp)
-                          acc = X.array.f(X.array.arrays[1].array[i, j, k])
-                      end
-                      while !(done(1:size(X.array.arrays[1].array, 3), tmp))
-                          (k, tmp) = next(1:size(X.array.arrays[1].array, 3), tmp)
-                          acc = X.f(acc, X.array.f(X.array.arrays[1].array[i, j, k]))
-                      end
-                      acc
-                  end
-              end|>striplines
+            let tmp = start(k_range)
+                if isempty(k_range)
+                    acc = X.empty
+                else
+                    k = first(k_range)
+                    acc = X.array.f(X.array.arrays[1].array[i,j,k])
+                    for k = k_range[2:end]
+                        acc = X.f(acc,X.array.f(X.array.arrays[1].array[i,j,k]))
+                    end
+                end
+                acc
+            end
+          end|>striplines
 
               @test kernel_expr(:X, typeof(X), testtype(@lower(X[i,j] = -Y[i,j,k])))|>striplines|>string  == string(tex)
     end
