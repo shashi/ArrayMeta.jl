@@ -15,16 +15,14 @@ This package aims to evolve the means available to express array operations at a
 The `@arrayop` macro can express array operations by denoting how the dimensions of the input array interact to produce dimensions of the output array. The notation is similar to [Einsten notation](https://en.wikipedia.org/wiki/Einstein_notation) (or its equivalent in [TensorOperations.jl](https://github.com/Jutho/TensorOperations.jl)) with some added features to support many more operations. By example,
 
 ```julia
-using Base.Test
-
 X = convert(Array, reshape(1:12, 4,3))
 Y = ones(3,4)
 
 # transpose (equivalent to X')
-@arrayop Y[i,j] := X[j,i]
+@arrayop Z[i,j] := X[j,i]
 
 # elementwise 1-arg (equivalent to sin.(X))
-@arrayop Y[i,j] := sin(X[i,j])
+@arrayop Z[i,j] := sin(X[i,j])
 
 # elementwise 2-args (equivalent to X .+ Y')
 @arrayop Z[i,j] := X[i,j] + Y[j,i]
@@ -33,25 +31,25 @@ Y = ones(3,4)
 @arrayop Z[i,j] := X[i,j] + im * Y[j,i]
 
 # reduce (default +-reduce). Note: returns a 0-dimensional array
-@arrayop Y[] := X[i,j]
+@arrayop Z[] := X[i,j]
 
 # reduce with a user-specified function
-@arrayop Y[] := X[i,j] [i=>*, j=>*]
+@arrayop Z[] := X[i,j] [i=>*, j=>*]
 
 # reducedim default (+)
-@arrayop Y[1, j] := X[i,j] # equivalent to reducedim(+, X, 1)
-@arrayop Y[i, 1] := X[i,j] # equivalent to reducedim(+, X, 2)
-@arrayop Y[i] := X[i,j]    # equivalent to squeeze(reducedim(+, X, 2)) / APL-style reducedim
+@arrayop Z[1, j] := X[i,j] # equivalent to reducedim(+, X, 1)
+@arrayop Z[i, 1] := X[i,j] # equivalent to reducedim(+, X, 2)
+@arrayop Z[i] := X[i,j]    # equivalent to squeeze(reducedim(+, X, 2)) / APL-style reducedim
 
 # reducedim with a user-specified function
-@arrayop Y[1, j] := X[i,j] [i=>*]  # equivalent to prod(X, 1)
+@arrayop Z[1, j] := X[i,j] [i=>*]  # equivalent to prod(X, 1)
 
 # broadcast
 y = [1, 2, 3, 4]
-@arrayop Y[i, j] := X[i, j] + y[i]
+@arrayop Z[i, j] := X[i, j] + y[i]
 
 y = [1 2 3]
-@arrayop Y[i, j] := X[i, j] + y[1, j]
+@arrayop Z[i, j] := X[i, j] + y[1, j]
 
 # matmul
 @arrayop Z[i, j] := X[i, k] * Y[k, j]
@@ -61,14 +59,17 @@ y = [1 2 3]
 
 The same expressions currently [work on Dagger arrays](https://github.com/shashi/ArrayMeta.jl/blob/d1aced541e82de5021ed92ea72f29375b472c77c/test/runtests.jl#L165-L210).
 
+The examples here are on 1 and 2 dimensional arrays but the notation generalizes to N dimensions.
+
 As an example of how this aids genericness, potentially, Base can define the `reducedim` function (for example) as:
+
 
 ```julia
 @generated function reducedim{dim}(f, X::AbstractArray, ::Val{dim})
     idx_in  = Any[Symbol("i$n") for n=1:ndims(X)]
     idx_out = copy(idx_in)
     idx_out[dim] = 1
-    :(@arrayop _[$(idx_out...)] := X[$(idx_in...)])
+    :(@arrayop _[$(idx_out...)] := X[$(idx_in...)] [$(idx_in[dim]) => $f])
 end
 ```
 
@@ -98,21 +99,22 @@ The task of `arrayop!` is to act as a generated function which returns the code 
 
 ## Things to do
 
-### Already practical stuff
+### Already practical things
 
 Although the prototype works the performance of `@arrayop` is far from optimal. These work items mainly deal with the performance:
 
 - Loop reordering
 - Blocked iteration to optimize for memory-locality
-- Tree reduce on Chunks in Dagger
+- Tree reduce on chunks in Dagger
 - Splitting up a large `ArrayOp` into composition of smaller operations to reduce communication costs in Dagger arrays. (e.g. Inner product can depend on half the number of chunks)
 
 ### Researchy things
 
-- sparse matrices
-- IndexedTable & AxisArrays
+- formalize interface for new array types to implement
+- implementation for sparse matrices
+- implementation for IndexedTable & AxisArrays
 - Autodifferentiation
 - Explore more operations to express in `@arrayop`
-  - Mapslices
-  - Getindex
-  - Stencils
+  - mapslices
+  - getindex
+  - stencils
