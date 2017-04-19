@@ -61,7 +61,7 @@ y = [1 2 3]
 
 The same expressions currently [work on Dagger arrays](https://github.com/shashi/ArrayMeta.jl/blob/d1aced541e82de5021ed92ea72f29375b472c77c/test/runtests.jl#L165-L210).
 
-You can imagine Base defining the `reducedim` function as:
+As an example of how this aids genericness, potentially, Base can define the `reducedim` function (for example) as:
 
 ```julia
 @generated function reducedim{dim}(f, X::AbstractArray, ::Val{dim})
@@ -71,6 +71,8 @@ You can imagine Base defining the `reducedim` function as:
     :(@arrayop _[$(idx_out...)] := X[$(idx_in...)])
 end
 ```
+
+Allowing it to work on both AbstractArrays and in a specialized way on Dagger's arrays.
 
 ## How it works
 
