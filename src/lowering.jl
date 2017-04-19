@@ -9,21 +9,21 @@ import Base: eltype
 
 Represents indexing over an N dimensional array A, with N `idx`
 Each index could be either:
-- `IterSym{:sym}()` object: denotes iteration using `sym` as the iteration index
-- `IterConst{T}(val::T)` object: denotes a constant in that dimension
+- `IndexSym{:sym}()` object: denotes iteration using `sym` as the iteration index
+- `IndexConst{T}(val::T)` object: denotes a constant in that dimension
                                  (e.g.this would be wrapping an Int in case of reducedim)
 """
 immutable Indexing{A, I}
     array::A
-    idx::I # Tuple of Union{IterSym, IterConst}
+    idx::I # Tuple of Union{IndexSym, IndexConst}
 end
 
 eltype{A,I}(::Type{Indexing{A,I}}) = eltype(A)
 arraytype{A,I}(::Type{Indexing{A,I}}) = A
 
-immutable IterSym{d} end
+immutable IndexSym{d} end
 
-immutable IterConst{T}
+immutable IndexConst{T}
     val::T
 end
 
@@ -36,7 +36,7 @@ Represents application of function `f` on corresponding elements of `arrays`.
 
 `A[i]*B[j]*42` would lower to:
 
-`Map(*, Indexing(A, IterSym{:i}()), Indexing(B, IterSym{:j}()), ConstArg{Int}(42))`
+`Map(*, Indexing(A, IndexSym{:i}()), Indexing(B, IndexSym{:j}()), ConstArg{Int}(42))`
 """
 immutable Map{F, Ts<:Tuple}
     f::F
@@ -60,20 +60,20 @@ end
 eltype{T}(::Type{ConstArg{T}}) = T
 
 """
-`Reduce(idx::IterSym, f, array, empty=default_identity)`
+`Reduce(idx::IndexSym, f, array, empty=default_identity)`
 
 Represents reduction of dimension indexed by `idx` in `array` using
 the function `f`, and `empty` as the identity value.
 
 `array` isa `Union{Indexing, Map, Reduce}`
 """
-immutable Reduce{idx<:IterSym, F, T, E}
+immutable Reduce{idx<:IndexSym, F, T, E}
     f::F
     array::T
     empty::E
 end
 
-function Reduce{I<:IterSym,F,T}(dim::I, f::F, array::T,
+function Reduce{I<:IndexSym,F,T}(dim::I, f::F, array::T,
                                 empty=reduction_identity(f, eltype(T)))
     Reduce{I,F,T, typeof(empty)}(f,array,empty)
 end
@@ -94,12 +94,12 @@ end
 
 function lower_index(idx, only_symbols=false)
     if isa(idx, Symbol)
-        IterSym{idx}()
+        IndexSym{idx}()
     else
         if only_symbols
             throw(ArgumentError("Got $idx instead of a symbol"))
         end
-        :(ArrayMeta.IterConst($idx))
+        :(ArrayMeta.IndexConst($idx))
     end
 end
 
@@ -176,4 +176,35 @@ end
 
 @inline function arrayop!{L,R}(t::ArrayOp{L,R})
     arrayop!(arraytype(L), t)
+end
+
+# Kind of a hack,
+# this method is the allocating version of arrayop!
+@inline @generated function arrayop!{var, L,R}(::Type{AllocVar{var}}, t::ArrayOp{L,R})
+    rspaces = index_spaces(:(t.rhs), R)
+
+    dims = Any[]
+    for (i, k) in enumerate(L.parameters[2].parameters)
+        if k <: IndexSym
+            sym = k.parameters[1]
+
+            if !haskey(rspaces, sym)
+                error("Could not figure out output dimension for symbol $sym.")
+            end
+
+            dim = first(rspaces[sym])
+            dimsz = :(indices($(dim[3]), $(dim[2])))
+            push!(dims, dimsz)
+        else
+            push!(dims, :(indices($(indexing_expr(:(t.lhs), k, i)), 1)))
+        end
+    end
+    lhs = :(ArrayMeta.allocarray($(arraytype(R)), $(dims...)))
+    quote
+        arrayop!(ArrayMeta.ArrayOp(Indexing($lhs, t.lhs.idx), t.rhs))
+    end
+end
+
+function allocarray{T,N}(::Type{Array{T,N}}, sz...)
+    similar(Array{T}, sz...)
 end

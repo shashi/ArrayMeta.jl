@@ -8,16 +8,16 @@ import ArrayMeta: indicesinvolved
     @test indicesinvolved(:(A[i,j,k] |> f)) == [:A=>Any[:i,:j,:k]]
 end
 
-import ArrayMeta: Indexing,Map,Reduce,IterSym,IterConst, arraytype, ConstArg
+import ArrayMeta: Indexing,Map,Reduce,IndexSym,IndexConst, arraytype, ConstArg
 @testset "Indexing" begin
-    itr = Indexing([1], (IterSym{:i}(),))
+    itr = Indexing([1], (IndexSym{:i}(),))
     @test eltype(typeof(itr)) == Int64
     @test arraytype(typeof(itr)) == Array{Int64,1}
 end
 
 @testset "Map" begin
-    itr1 = Indexing([1], (IterSym{:i}()))
-    itr2 = Indexing([1.], (IterSym{:j}()))
+    itr1 = Indexing([1], (IndexSym{:i}()))
+    itr2 = Indexing([1.], (IndexSym{:j}()))
     map1 = Map(*, (itr1, itr2))
     map2 = Map(/, (ConstArg(1), itr1))
     @test eltype(typeof(map1)) == Float64
@@ -26,15 +26,15 @@ end
 end
 
 @testset "Reduce" begin
-    itr1 = Indexing(rand(Int,10), (IterSym{:i}(),))
-    @test eltype(Reduce(IterSym{:i}(), push!, itr1, Int[])) == Array{Int,1}
+    itr1 = Indexing(rand(Int,10), (IndexSym{:i}(),))
+    @test eltype(Reduce(IndexSym{:i}(), push!, itr1, Int[])) == Array{Int,1}
 end
 
 import ArrayMeta: @lower, ArrayOp
 
 @testset "Lower" begin
     A = rand(2,2); B = rand(2,2); C = rand(2,2);
-    i, j, k = [IterSym{x}() for x in [:i,:j,:k]]
+    i, j, k = [IndexSym{x}() for x in [:i,:j,:k]]
     # map
     @test @lower(A[i,j] = B[i,j]) == ArrayOp(Indexing(A, (i, j)), Indexing(B, (i, j)))
 
@@ -45,16 +45,16 @@ import ArrayMeta: @lower, ArrayOp
     @test @lower(A[j] = B[j,i])   == ArrayOp(Indexing(A, (j,)), Reduce(i, +, Indexing(B, (j, i))))
 
     # reduced over i, output is reducedim
-    @test @lower(A[1,j] = B[i,j]) == ArrayOp(Indexing(A, (IterConst{Int}(1), j)), Reduce(i, +, Indexing(B, (i, j))))
+    @test @lower(A[1,j] = B[i,j]) == ArrayOp(Indexing(A, (IndexConst{Int}(1), j)), Reduce(i, +, Indexing(B, (i, j))))
 
     # reduce both dimensions, use * to reduce i and + to reduce j
-    @test @lower(A[1,1] = B[i,j], [i=>*,j=>+]) == ArrayOp(Indexing(A, (IterConst{Int}(1), IterConst{Int}(1))),
+    @test @lower(A[1,1] = B[i,j], [i=>*,j=>+]) == ArrayOp(Indexing(A, (IndexConst{Int}(1), IndexConst{Int}(1))),
                                                            Reduce(j, +, Reduce(i, *, Indexing(B, (i, j)))))
 end
 
 import ArrayMeta: index_spaces
 @testset "indexspaces" begin
-    i,j,k=IterSym{:i}(), IterSym{:j}(), IterSym{:k}()
+    i,j,k=IndexSym{:i}(), IndexSym{:j}(), IndexSym{:k}()
     itr = Indexing(rand(10,10), (i,j))
     @test (index_spaces(:X, typeof(itr))|>string ==
         Dict{Any,Any}(:i=>Any[(Array{Float64, 2}, 1, :(X.array))],
