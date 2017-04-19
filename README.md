@@ -12,7 +12,7 @@ This package aims to evolve the means available to express array operations at a
 
 ## The `@arrayop` macro
 
-The `@arrayop` macro can express array operations by denoting how the dimensions of the input array interact to produce dimensions of the output array. By example,
+The `@arrayop` macro can express array operations by denoting how the dimensions of the input array interact to produce dimensions of the output array. The notation is similar to [Einsten notation](https://en.wikipedia.org/wiki/Einstein_notation) (or its equivalent in [TensorOperations.jl](https://github.com/Jutho/TensorOperations.jl)) with some added features to support many more operations. By example,
 
 ```julia
 using Base.Test
@@ -20,47 +20,46 @@ using Base.Test
 X = convert(Array, reshape(1:12, 4,3))
 Y = ones(3,4)
 
-# copy
-@test @arrayop(_[i,j] := X[i,j]) == X
+# transpose (equivalent to X')
+@arrayop Y[i,j] := X[j,i]
 
-# transpose
-@test @arrayop(_[i,j] := X[j,i]) == X'
+# elementwise 1-arg (equivalent to sin.(X))
+@arrayop Y[i,j] := sin(X[i,j])
 
-# elementwise 1-arg
-@test @arrayop(_[i,j] := -X[i,j]) == -X
+# elementwise 2-args (equivalent to X .+ Y')
+@arrayop Z[i,j] := X[i,j] + Y[j,i]
 
-# elementwise 2-args
-@test @arrayop(_[i,j] := X[i,j] + Y[j,i]) == X + Y'
+# elementwise with a constant (equivalent to X .+ (im .* Y'))
+@arrayop Z[i,j] := X[i,j] + im * Y[j,i]
 
-# elementwise with const
-@test @arrayop(_[] := 2 * X[i,j])[] == sum(2.*X)
+# reduce (default +-reduce). Note: returns a 0-dimensional array
+@arrayop Y[] := X[i,j]
 
-# reduce default (+)
-@test @arrayop(_[] := X[i,j])[] == sum(X)
-
-# reduce with function
-@test @arrayop(_[] := X[i,j], [i=>*, j=>*])[] == prod(X)
+# reduce with a user-specified function
+@arrayop Y[] := X[i,j] [i=>*, j=>*]
 
 # reducedim default (+)
-@test @arrayop(_[1, j] := X[i,j]) == sum(X, 1)
-@test @arrayop(_[i, 1] := X[i,j]) == sum(X, 2)
+@arrayop Y[1, j] := X[i,j] # equivalent to reducedim(+, X, 1)
+@arrayop Y[i, 1] := X[i,j] # equivalent to reducedim(+, X, 2)
+@arrayop Y[i] := X[i,j]    # equivalent to squeeze(reducedim(+, X, 2)) / APL-style reducedim
 
-# reducedim with custom function
-@test @arrayop(_[1, j] := X[i,j], [i=>*]) == prod(X, 1)
+# reducedim with a user-specified function
+@arrayop Y[1, j] := X[i,j] [i=>*]  # equivalent to prod(X, 1)
 
 # broadcast
 y = [1, 2, 3, 4]
-@test @arrayop(_[i, j] := X[i, j] + y[i]) == X .+ y
+@arrayop Y[i, j] := X[i, j] + y[i]
+
 y = [1 2 3]
-@test @arrayop(_[i, j] := X[i, j] + y[1, j]) == X .+ y
+@arrayop Y[i, j] := X[i, j] + y[1, j]
 
 # matmul
-@test @arrayop(_[i, j] := X[i,k] * Y[k,j]) == X*Y
+@arrayop Z[i, j] := X[i, k] * Y[k, j]
 ```
 
-The same expressions currently [work on Dagger arrays](https://github.com/shashi/ArrayMeta.jl/blob/d1aced541e82de5021ed92ea72f29375b472c77c/test/runtests.jl#L165-L210).
-
 `@arrayop Z[i, j] = X[i,k] * Y[k,j]` works in-place (if `=` is used instead of `:=`) by overwriting `Z`.
+
+The same expressions currently [work on Dagger arrays](https://github.com/shashi/ArrayMeta.jl/blob/d1aced541e82de5021ed92ea72f29375b472c77c/test/runtests.jl#L165-L210).
 
 You can imagine Base defining the `reducedim` function as:
 
@@ -112,5 +111,6 @@ Although the prototype works the performance of `@arrayop` is far from optimal. 
 - IndexedTable & AxisArrays
 - Autodifferentiation
 - Explore more operations to express in `@arrayop`
+  - Mapslices
   - Getindex
   - Stencils
