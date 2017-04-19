@@ -94,3 +94,23 @@ The lowered object got from the expression in Step 1 is passed to `arrayop!`. By
 ### Step 3: generating loop expressions
 
 The task of `arrayop!` is to act as a generated function which returns the code that can perofm a given operation. The code for doing this on AbstractArrays is at [`src/impl/abstract.jl`](https://github.com/shashi/ArrayMeta.jl/blob/7df2c0a08e3dcd6d05f1aab1dc229c925f174790/src/impl/abstract.jl#L124-L126). The Dagger implementation is at [`src/impl/dagger.jl`](https://github.com/shashi/ArrayMeta.jl/blob/7df2c0a08e3dcd6d05f1aab1dc229c925f174790/src/impl/dagger.jl#L42-L49). It was possible to acheive the Dagger implementation without generating any loop expressions, and interestingly, only by rewriting the lowered form from Step 1 to a lowered form that act on the chunks of the DArray can be handled by the AbstractArray implementation.
+
+## Things to do
+
+### Already practical stuff
+
+Although the prototype works the performance of `@arrayop` is far from optimal. These work items mainly deal with the performance:
+
+- Loop reordering
+- Blocked iteration to optimize for memory-locality
+- Tree reduce on Chunks in Dagger
+- Splitting up a large `ArrayOp` into composition of smaller operations to reduce communication costs in Dagger arrays. (e.g. Inner product can depend on half the number of chunks)
+
+### Researchy things
+
+- sparse matrices
+- IndexedTable & AxisArrays
+- Autodifferentiation
+- Explore more operations to express in `@arrayop`
+  - Getindex
+  - Stencils
