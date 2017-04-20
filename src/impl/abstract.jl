@@ -1,3 +1,5 @@
+using TiledIteration
+
 # constructs Dict
 # Keys:  indexing symbol
 # Value: a list of (array type, dimension, expr) tuples which correspond to that
@@ -129,12 +131,20 @@ function arrayop_body{A<:AbstractArray, L,R}(name, ::Type{A}, op::Type{ArrayOp{L
         T,dim,nm = first(spaces)
         push!(input_ranges, Symbol("$(sym)_range") => :(1:size($nm, $dim)))
     end
-    fn = gensym("arrayop")
-    expr = :(function $fn($name, $(map(first, input_ranges)...))
-                $expr
-             end)
+    #fn = gensym("arrayop")
+    expr = quote
+        ranges = ($(map(last, input_ranges)...),)
+        for tile in TileIterator(ranges, tilesize(ranges))
+            ($(map(first, input_ranges)...),) = tile
+            $expr
+        end
+    end
 
-    :($checks; $expr; $fn($name, $(map(last, input_ranges)...)); $name.lhs.array)
+    :($checks; $expr; $name.lhs.array)
+end
+
+function tilesize(ranges)
+    map(x->16, ranges)
 end
 
 @inline @generated function arrayop!{L,R,A<:AbstractArray}(::Type{A}, t::ArrayOp{L,R})
