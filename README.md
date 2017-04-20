@@ -79,12 +79,12 @@ Allowing it to work on both AbstractArrays and in a specialized way on Dagger's 
 
 ### Step 1: Lowering an `@arrayop` expression to an intermediate form
 
-The `@arrayop <expr>` simply translates to `arrayop!(@lower <expr>)`. The goal of `@lower` is to lower the expression to type `ArrayOp` which contains an LHS and an RHS consisting of combination of `Indexing`, `Map` and `Reduce` types.
+The `@arrayop <expr>` simply translates to `arrayop!(@lower <expr>)`. The goal of `@lower` is to lower the expression to type `ArrayOp` which contains an LHS and an RHS consisting of combination of `Indexing` and `Map` types.
 
 - `A[i, j]` becomes `Indexing(A, IndexSym{:i}(), IndexSym{:j}())`
 - `A[i, 1]` becomes `Indexing(A, IndexSym{:i}(), IndexConst{Int}(1))`
 - `f(A[i, j])` becomes `Map(f, <lowering of A[i,j]>)`
-- `B[i] = f(A[i, j])` creates an ArrayOp with `Reduce(f, <lowering of f(A[i,j])>, reduction_identity(f, eltype(A)))` on the RHS, and `Indexing(B, IndexSym{:i}())` on LHS
+- `B[i] = f(A[i, j])` becomes `ArrayOp(<lowering of B[i]>, <lowering of f(A[i,j])>, +, reduction_identity(+, eltype(A)))` on the RHS, and `Indexing(B, IndexSym{:i}())` on LHS
 - `B[i] := f(A[i, j])` creates a similar `ArrayOp` but the LHS contains `Indexing(AllocVar{:B}, IndexSym{:i}())` denoting an output array (named `B`) should be allocated and then iterated.
 
 You can try out a few expressions with the `@lower` macro to see how they get lowered. These types for representing the lowered form of the expression are parameterized by the types of all their arguments allowing functions in the next steps to dispatch on and generate efficient code tailored to the specific expression and specific array types.

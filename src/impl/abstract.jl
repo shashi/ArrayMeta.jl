@@ -29,10 +29,6 @@ function index_spaces{F, X}(name, itr::Type{Map{F, X}})
     merge_dictofvecs(inner...)
 end
 
-function index_spaces{I,F,T,E}(name, itr::Type{Reduce{I,F,T,E}})
-    index_spaces(:($name.array), T)
-end
-
 function index_spaces{L,R,F,E}(name, itr::Type{ArrayOp{L,R,F,E}})
     merge_dictofvecs(index_spaces(:($name.lhs), L), index_spaces(:($name.rhs), R))
 end
@@ -49,33 +45,23 @@ function get_subscripts{X,Idx}(name, itr::Type{Indexing{X, Idx}})
 end
 
 # Generate the expression corresponding to a type
-function kernel_expr(name, lhs, itr)
-    kernel_expr(name, arraytype(itr), lhs, itr)
+function kernel_expr(name, itr)
+    kernel_expr(name, arraytype(itr), itr)
 end
 
 function kernel_expr{X, Idx, A<:AbstractArray}(name, ::Type{A},
-                                               lhs,
                                                itr::Type{Indexing{X, Idx}})
     idx = get_subscripts(name, itr)
     :($name.array[$(idx...)])
 end
 
 function kernel_expr{A<:AbstractArray, F, Ts}(name, ::Type{A},
-                                              lhs,
                                               itr::Type{Map{F, Ts}})
 
-    inner_kernels = [kernel_expr(:($name.arrays[$i]), arraytype(T), lhs, T)
+    inner_kernels = [kernel_expr(:($name.arrays[$i]), arraytype(T), T)
                         for (i, T) in enumerate(Ts.parameters)]
 
     :($name.f($(inner_kernels...)))
-end
-
-function kernel_expr{A <: AbstractArray, idx, F, T, E}(name, ::Type{A},
-                                   lhs,
-                                   itr::Type{Reduce{IndexSym{idx}, F, T, E}})
-
-    inner = kernel_expr(:($name.array), arraytype(T), lhs, T)
-    :($name.f($lhs, $inner))
 end
 
 allequal(x) = true
@@ -83,11 +69,19 @@ function allequal(x, xs...)
     x == xs[1] && allequal(xs...)
 end
 
-function arrayop_body{A<:AbstractArray, L,R,F,E}(name, ::Type{A}, op::Type{ArrayOp{L,R,F,E}})
-    acc = kernel_expr(:($name.lhs), :(), L) # :() will be ignored
-    rhs_inner = kernel_expr(:($name.rhs), acc, R)
+function arrayop_body{A<:AbstractArray, L,R,F,E}(name, ::Type{A},
+                                                 op::Type{ArrayOp{L,R,F,E}})
 
-    expr = :($acc = $rhs_inner)
+    acc = kernel_expr(:($name.lhs), L) # :() will be ignored
+    rhs_inner = kernel_expr(:($name.rhs), R)
+
+    if hasreduceddims(op)
+        # we need to wrap the expression in a call to the reducer
+        expr = :($acc = $name.reducefn($acc, $rhs_inner))
+    else
+        expr = :($acc = $rhs_inner)
+    end
+
     checks = :()
     input_ranges = Any[]
 
@@ -128,5 +122,5 @@ function tilesize(ranges)
 end
 
 @inline @generated function arrayop!{L,R,A<:AbstractArray}(::Type{A}, t::ArrayOp{L,R})
-    arrayop_body(:t, arraytype(L), t)
+    MacroTools.prettify(arrayop_body(:t, arraytype(L), t))
 end

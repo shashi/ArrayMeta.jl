@@ -58,35 +58,11 @@ immutable ConstArg{T}
 end
 
 eltype{T}(::Type{ConstArg{T}}) = T
-
-"""
-`Reduce(idx::IndexSym, f, array, empty=default_identity)`
-
-Represents reduction of dimension indexed by `idx` in `array` using
-the function `f`, and `empty` as the identity value.
-
-`array` isa `Union{Indexing, Map, Reduce}`
-"""
-immutable Reduce{idx<:IndexSym, F, T, E}
-    f::F
-    array::T
-    empty::E
-end
-
-function Reduce{I<:IndexSym,F,T}(dim::I, f::F, array::T,
-                                empty=reduction_identity(f, eltype(T)))
-    Reduce{I,F,T, typeof(empty)}(f,array,empty)
-end
-
-@pure eltype{idx,F,T}(::Type{Reduce{idx, F, T, Void}}) = _promote_op_t(F, eltype(T), eltype(T))
-@pure eltype{idx,F,T,E}(::Type{Reduce{idx, F, T, E}}) = _promote_op_t(F, E, eltype(T))
-@pure arraytype{idx,F,T,E}(::Type{Reduce{idx, F, T, E}}) = arraytype(T)
-
 """
 `ArrayOp(lhs, rhs)`
 
 represents a tensor operation. `lhs` is an `Indexing` representing the LHS of the tensor expression
-`rhs` isa `Union{Indexing, Map, Reduce}`
+`rhs` isa `Union{Indexing, Map}`
 """
 immutable ArrayOp{L<:Indexing,R,F,E}
     lhs::L
@@ -94,6 +70,7 @@ immutable ArrayOp{L<:Indexing,R,F,E}
     reducefn::F
     empty::E
 end
+ArrayOp(lhs, rhs) = ArrayOp(lhs, rhs, +, nothing)
 
 function lower_index(idx, only_symbols=false)
     if isa(idx, Symbol)
@@ -133,17 +110,10 @@ function lower(expr, reducefn, default=nothing)
     lidxs = indicesinvolved(lhs)
     ridxs = indicesinvolved(rhs)
 
-    # which indices iterate over which dimension of the input
-    # idxdims = index_dim_map(ridxs) # TODO: use this to verify correct dimensions
-    lowered_maps = lower_indexing_and_maps(rhs)
+    rhs_lowered = lower_indexing_and_maps(rhs)
 
     # which indices are reduced over
     reduceddims = setdiff(flatten(last.(ridxs)), flatten(last.(lidxs)))
-
-    # lower reduces
-    rhs_lowered = reduce(lowered_maps, reduceddims) do ex, idx
-        :(ArrayMeta.Reduce($(lower_index(idx, true)), $reducefn, $ex, $default))
-    end
 
     if alloc
         :(ArrayMeta.ArrayOp($(lower_alloc_indexing(lhs)), $rhs_lowered,
@@ -171,12 +141,20 @@ end
     arrayop!(arraytype(L), t)
 end
 
+function hasreduceddims{L,R,F,E}(op::Type{ArrayOp{L,R,F,E}})
+    rspaces = index_spaces(:(rhs), R)
+    lspaces = index_spaces(:(lhs), L)
+    !isempty(setdiff(keys(rspaces), keys(lspaces)))
+end
+hasreduceddims(op::ArrayOp) = hasreduceddims(typeof(op))
+
 # Kind of a hack,
 # this method is the allocating version of arrayop!
 @inline @generated function arrayop!{var, L,R}(::Type{AllocVar{var}}, t::ArrayOp{L,R})
+
     rspaces = index_spaces(:(t.rhs), R)
     lspaces = index_spaces(:(t.lhs), L)
-
+    reduced_dims = setdiff(keys(rspaces), keys(lspaces))
     dims = Any[]
     for (i, k) in enumerate(L.parameters[2].parameters)
         if k <: IndexSym
@@ -195,9 +173,6 @@ end
         end
     end
 
-    reduced_dims = setdiff(keys(rspaces), keys(lspaces))
-    @show R
-    @show eltype(R)
     if !isempty(reduced_dims)
         # this means that the operation involves some kind of
         # accumulation. We need to fill the array with an appropriate initial value

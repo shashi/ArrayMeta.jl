@@ -8,7 +8,7 @@ import ArrayMeta: indicesinvolved
     @test indicesinvolved(:(A[i,j,k] |> f)) == [:A=>Any[:i,:j,:k]]
 end
 
-import ArrayMeta: Indexing,Map,Reduce,IndexSym,IndexConst, arraytype, ConstArg
+import ArrayMeta: Indexing,Map,IndexSym,IndexConst, arraytype, ConstArg
 @testset "Indexing" begin
     itr = Indexing([1], (IndexSym{:i}(),))
     @test eltype(typeof(itr)) == Int64
@@ -25,10 +25,6 @@ end
     @test arraytype(typeof(map1)) <: Array
 end
 
-@testset "Reduce" begin
-    itr1 = Indexing(rand(Int,10), (IndexSym{:i}(),))
-    @test eltype(Reduce(IndexSym{:i}(), push!, itr1, Int[])) == Array{Int,1}
-end
 
 import ArrayMeta: @lower, ArrayOp
 
@@ -42,14 +38,13 @@ import ArrayMeta: @lower, ArrayOp
     @test @lower(A[i,j] = B[j,i]) == ArrayOp(Indexing(A, (i, j)), Indexing(B, (j, i)))
 
     # reduced over i:
-    @test @lower(A[j] = B[j,i])   == ArrayOp(Indexing(A, (j,)), Reduce(i, +, Indexing(B, (j, i))))
+    @test @lower(A[j] = B[j,i])   == ArrayOp(Indexing(A, (j,)), Indexing(B, (j, i)))
 
     # reduced over i, output is reducedim
-    @test @lower(A[1,j] = B[i,j]) == ArrayOp(Indexing(A, (IndexConst{Int}(1), j)), Reduce(i, +, Indexing(B, (i, j))))
+    @test @lower(A[1,j] = B[i,j]) == ArrayOp(Indexing(A, (IndexConst{Int}(1), j)), Indexing(B, (i, j)))
 
     # reduce both dimensions, use * to reduce i and + to reduce j
-    @test @lower(A[1,1] = B[i,j], [i=>*,j=>+]) == ArrayOp(Indexing(A, (IndexConst{Int}(1), IndexConst{Int}(1))),
-                                                           Reduce(j, +, Reduce(i, *, Indexing(B, (i, j)))))
+    @test @lower(A[1,1] = B[i,j], *) == ArrayOp(Indexing(A, (IndexConst{Int}(1), IndexConst{Int}(1))), Indexing(B, (i, j)), *, nothing)
 end
 
 import ArrayMeta: index_spaces
@@ -89,28 +84,6 @@ import ArrayMeta: kernel_expr
         @test kernel_expr(:X,Array{Float64,2}, testtype(@lower(X[i,j,k] = -Y[i,j,k])))|>string == :(X.f(X.arrays[1].array[i,j,k]))|>string
         @test kernel_expr(:X,Array{Float64,2}, testtype(@lower(X[i,j,k] = X[i,k,j]-Y[i,j,k])))|>string == :(X.f(X.arrays[1].array[i,k,j], X.arrays[2].array[i,j,k]))|>string
     end
-
-    @testset "Reduce" begin
-        X = rand(2,2);
-        Y = rand(2,2);
-        testtype(x) = typeof(x.rhs)
-        tex = quote
-            let tmp = start(k_range)
-                if isempty(k_range)
-                    acc = X.empty
-                else
-                    k = first(k_range)
-                    acc = X.array.f(X.array.arrays[1].array[i,j,k])
-                    for k = k_range[2:end]
-                        acc = X.f(acc,X.array.f(X.array.arrays[1].array[i,j,k]))
-                    end
-                end
-                acc
-            end
-          end|>striplines
-
-              @test kernel_expr(:X, typeof(X), testtype(@lower(X[i,j] = -Y[i,j,k])))|>striplines|>string  == string(tex)
-    end
 end
 
 using Dagger
@@ -140,20 +113,20 @@ import ArrayMeta: @arrayop
     @test @arrayop(_[] := X[i,j])[] == sum(X)
 
     # reduce with function
-    @test @arrayop(_[] := X[i,j], [i=>*, j=>*])[] == prod(X)
+    @test @arrayop(_[] := X[i,j], *)[] == prod(X)
 
     # reducedim default (+)
     @test @arrayop(_[1, j] := X[i,j]) == sum(X, 1)
     @test @arrayop(_[i, 1] := X[i,j]) == sum(X, 2)
 
     # reducedim with function
-    @test @arrayop(_[1, j] := X[i,j], (i=>*,)) == prod(X, 1)
+    @test @arrayop(_[1, j] := X[i,j], *) == prod(X, 1)
 
     # broadcast
     y = [1, 2, 3, 4]
     @test @arrayop(_[i, j] := X[i, j] + y[i]) == X .+ y
     y = [1 2 3]
-    @test @arrayop(_[i, j] := X[i, j] + y[j]) == X .+ y
+    @test @arrayop(_[i, j] := X[i, j] + y[1, j]) == X .+ y
 
     # matmul
     @test @arrayop(_[i, j] := X[i,k] * Y[k,j]) == X*Y
@@ -187,14 +160,14 @@ Base.:(==)(a::ArrayMeta.DArray, b::Array) = gather(a) == b
     @test gather(@arrayop(_[1,1] := dX[i,j])) |> first == sum(X)
 
     # reduce with function
-    @test gather(@arrayop(_[1,1] := dX[i,j], [i=>*, j=>*])) |> first == prod(X)
+    @test gather(@arrayop(_[1,1] := dX[i,j], *)) |> first == prod(X)
 
     # reducedim default (+)
     @test @arrayop(_[1, j] := dX[i,j]) == sum(X, 1)
     @test @arrayop(_[i, 1] := dX[i,j]) == sum(X, 2)
 
     # reducedim with function
-    @test @arrayop(_[1, j] := dX[i,j], (i=>*,)) == prod(X, 1)
+    @test @arrayop(_[1, j] := dX[i,j], *) == prod(X, 1)
 
     # broadcast
     y = [1, 2, 3, 4]

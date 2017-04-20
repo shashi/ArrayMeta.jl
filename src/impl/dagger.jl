@@ -26,24 +26,21 @@ function onchunks(X::Map)
 end
 
 
-function onchunks{dim}(X::Reduce{dim})
-    let f = X.f
-        # Reduce each chunk first
-        reduced_chunks = Map(delayed(x -> Reduce(dim(), f, x)), (onchunks(X.array),))
-
-        # reduce the chunks array
-        Reduce(dim(), delayed((a,b)->Map(f, (a, b))), reduced_chunks, Thunk(()->nothing)) # must be made tree reduce
-    end
-end
-
 function onchunks(itr::ArrayOp)
-    ArrayOp(onchunks(itr.lhs), onchunks(itr.rhs))
+    if !hasreduceddims(itr)
+        return ArrayOp(onchunks(itr.lhs), onchunks(itr.rhs))
+    end
+    let f = itr.reducefn
+        reducefn = delayed((a,b)->Map(f, (a, b)))
+        init = Thunk(()->error("Empty thunks won't be handled at the moment."))
+        ArrayOp(onchunks(itr.lhs), onchunks(itr.rhs), reducefn, init)
+    end
 end
 
 function arrayop!{D<:DArray}(::Type{D}, t::ArrayOp)
     cs = arrayop!(onchunks(t))
     L(x) = Indexing(x, t.lhs.idx)
-    t.lhs.array.result.chunks = map(delayed((l,r) -> arrayop!(ArrayOp(L(l), r))),
+    t.lhs.array.result.chunks = map(delayed((l,r) -> arrayop!(ArrayOp(L(l), r, t.reducefn, t.empty))),
                                     chunks(t.lhs.array), cs)
     t.lhs.array
 end
