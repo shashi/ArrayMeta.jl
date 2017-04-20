@@ -58,12 +58,12 @@ function Base.indices(x::DArray, i)
     Dagger.DomainBlocks((idxs.start[i],), (idxs.cumlength[i],))
 end
 
-function allocarray{T,N}(::Type{DArray{T,N}}, idxs...)
+function allocarray{T,N}(::Type{DArray{T,N}}, default, idxs...)
     dmnchunks = DomainBlocks(map(i->1, idxs),
                              map(i->isa(i, DomainBlocks) ?
                                  i.cumlength[1] : (length(i),), idxs))
 
-    chnks = map(delayed(subd -> Array{T}(size(subd))), dmnchunks)
+    chnks = map(delayed(subd -> allocarray(Array{T,1}, default, size(subd))), dmnchunks)
     sz = map((x,y)->x-y+1, map(last, dmnchunks.cumlength), dmnchunks.start)
     dmn = ArrayDomain(map(x->1:x, sz))
     DArray(Dagger.Cat(Array{T, length(idxs)}, dmn, dmnchunks, chnks))

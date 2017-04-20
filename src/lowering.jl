@@ -78,6 +78,7 @@ function Reduce{I<:IndexSym,F,T}(dim::I, f::F, array::T,
     Reduce{I,F,T, typeof(empty)}(f,array,empty)
 end
 
+@pure eltype{idx,F,T}(::Type{Reduce{idx, F, T, Void}}) = _promote_op_t(F, eltype(T), eltype(T))
 @pure eltype{idx,F,T,E}(::Type{Reduce{idx, F, T, E}}) = _promote_op_t(F, E, eltype(T))
 @pure arraytype{idx,F,T,E}(::Type{Reduce{idx, F, T, E}}) = arraytype(T)
 
@@ -87,9 +88,11 @@ end
 represents a tensor operation. `lhs` is an `Indexing` representing the LHS of the tensor expression
 `rhs` isa `Union{Indexing, Map, Reduce}`
 """
-immutable ArrayOp{L<:Indexing,R}
+immutable ArrayOp{L<:Indexing,R,F,E}
     lhs::L
     rhs::R
+    reducefn::F
+    empty::E
 end
 
 function lower_index(idx, only_symbols=false)
@@ -121,18 +124,7 @@ function lower_alloc_indexing(expr)
     end
 end
 
-# Get a Dictionary of reduction functions
-function reduction_functions(reductions)
-    @match reductions begin
-        (i_=>f_) => Dict(i => f)
-        (R__,) => reduce(merge, map(reduction_functions, R))
-        [R__] => reduce(merge, map(reduction_functions, R))
-        0 => Dict()
-        _ => error("Invalid reduction spec")
-    end
-end
-
-function lower(expr, reductions)
+function lower(expr, reducefn, default=nothing)
     lhs, rhs, alloc = @match expr begin
         (lhs_ = rhs_) => lhs, rhs, false
         (lhs_ := rhs_) => lhs, rhs, true
@@ -147,22 +139,23 @@ function lower(expr, reductions)
 
     # which indices are reduced over
     reduceddims = setdiff(flatten(last.(ridxs)), flatten(last.(lidxs)))
-    reduce_dict = reduction_functions(reductions)
 
     # lower reduces
     rhs_lowered = reduce(lowered_maps, reduceddims) do ex, idx
-        :(ArrayMeta.Reduce($(lower_index(idx, true)), $(get(reduce_dict, idx, +)), $ex))
+        :(ArrayMeta.Reduce($(lower_index(idx, true)), $reducefn, $ex, $default))
     end
 
     if alloc
-        :(ArrayMeta.ArrayOp($(lower_alloc_indexing(lhs)), $rhs_lowered))
+        :(ArrayMeta.ArrayOp($(lower_alloc_indexing(lhs)), $rhs_lowered,
+                            $reducefn, $default))
     else
-        :(ArrayMeta.ArrayOp($(lower_indexing_and_maps(lhs)), $rhs_lowered))
+        :(ArrayMeta.ArrayOp($(lower_indexing_and_maps(lhs)), $rhs_lowered,
+                            $reducefn, $default))
     end
 end
 
-macro lower(expr, reductions=0)
-    lower(expr, reductions) |> esc
+macro lower(expr, reducefn=+, default=nothing)
+    lower(expr, reducefn, default) |> esc
 end
 
 """
@@ -170,8 +163,8 @@ end
 
 Perform a tensor operation
 """
-macro arrayop(expr, reductions=0)
-    :(ArrayMeta.arrayop!($(lower(expr, reductions)))) |> esc
+macro arrayop(expr, reducefn=+, default=nothing)
+    :(ArrayMeta.arrayop!($(lower(expr, reducefn, default)))) |> esc
 end
 
 @inline function arrayop!{L,R}(t::ArrayOp{L,R})
@@ -182,6 +175,7 @@ end
 # this method is the allocating version of arrayop!
 @inline @generated function arrayop!{var, L,R}(::Type{AllocVar{var}}, t::ArrayOp{L,R})
     rspaces = index_spaces(:(t.rhs), R)
+    lspaces = index_spaces(:(t.lhs), L)
 
     dims = Any[]
     for (i, k) in enumerate(L.parameters[2].parameters)
@@ -196,15 +190,41 @@ end
             dimsz = :(indices($(dim[3]), $(dim[2])))
             push!(dims, dimsz)
         else
+            # Indexed by a constant
             push!(dims, :(indices($(indexing_expr(:(t.lhs), k, i)), 1)))
         end
     end
-    lhs = :(ArrayMeta.allocarray($(arraytype(R)), $(dims...)))
+
+    reduced_dims = setdiff(keys(rspaces), keys(lspaces))
+    @show R
+    @show eltype(R)
+    if !isempty(reduced_dims)
+        # this means that the operation involves some kind of
+        # accumulation. We need to fill the array with an appropriate initial value
+        lhsarray = quote
+            init = t.empty === nothing ?
+                reduction_identity(t.reducefn, $(eltype(R))) : t.empty
+            lhs = ArrayMeta.allocarray($(arraytype(R)), init, $(dims...))
+        end
+    else
+        # we don't care how the array is initialized we're going to overwrite it fully anyway.
+        lhsarray = quote
+            lhs = ArrayMeta.allocarray($(arraytype(R)), nothing, $(dims...))
+        end
+    end
+
     quote
-        arrayop!(ArrayMeta.ArrayOp(Indexing($lhs, t.lhs.idx), t.rhs))
+        $lhsarray
+        arrayop!(ArrayMeta.ArrayOp(Indexing(lhs, t.lhs.idx), t.rhs,
+                                   t.reducefn, t.empty))
     end
 end
 
-function allocarray{T,N}(::Type{Array{T,N}}, sz...)
-    similar(Array{T}, sz...)
+function allocarray{T,N}(::Type{Array{T,N}}, default, sz...)
+    x = similar(Array{T}, sz...)
+    if default !== nothing
+        fill!(x, default)
+    else
+        x
+    end
 end

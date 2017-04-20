@@ -4,7 +4,7 @@ using TiledIteration
 # Keys:  indexing symbol
 # Value: a list of (array type, dimension, expr) tuples which correspond to that
 #        indexing symbol
-function index_spaces{X<:AbstractArray,Idx}(name, itr::Type{Indexing{X, Idx}})
+function index_spaces{X,Idx}(name, itr::Type{Indexing{X, Idx}})
     idx_spaces = Dict()
 
     for (dim, idx) in enumerate(Idx.parameters)
@@ -33,7 +33,7 @@ function index_spaces{I,F,T,E}(name, itr::Type{Reduce{I,F,T,E}})
     index_spaces(:($name.array), T)
 end
 
-function index_spaces{L,R}(name, itr::Type{ArrayOp{L,R}})
+function index_spaces{L,R,F,E}(name, itr::Type{ArrayOp{L,R,F,E}})
     merge_dictofvecs(index_spaces(:($name.lhs), L), index_spaces(:($name.rhs), R))
 end
 
@@ -83,13 +83,15 @@ function allequal(x, xs...)
     x == xs[1] && allequal(xs...)
 end
 
-function arrayop_body{A<:AbstractArray, L,R}(name, ::Type{A}, op::Type{ArrayOp{L,R}})
+function arrayop_body{A<:AbstractArray, L,R,F,E}(name, ::Type{A}, op::Type{ArrayOp{L,R,F,E}})
     acc = kernel_expr(:($name.lhs), :(), L) # :() will be ignored
     rhs_inner = kernel_expr(:($name.rhs), acc, R)
 
     expr = :($acc = $rhs_inner)
     checks = :()
     input_ranges = Any[]
+
+    simded = false
 
     for (sym, spaces) in index_spaces(name, op) # sort this based on # of potential cache misses
         if length(spaces) > 1
@@ -100,16 +102,19 @@ function arrayop_body{A<:AbstractArray, L,R}(name, ::Type{A}, op::Type{ArrayOp{L
         T,dim,nm = first(spaces)
         sym_range = Symbol("$(sym)_range")
         push!(input_ranges, sym_range => :(indices($nm, $dim)))
-        expr = quote
-            for $sym in $sym_range
-                $expr
-            end
+        expr = :(for $sym in $sym_range
+                    $expr
+                end)
+        if !simded
+            # innermost loop
+            expr = :(@simd $expr)
+            simded = true
         end
     end
 
     expr = quote
         ranges = ($(map(last, input_ranges)...),)
-        for tile in TileIterator(ranges, tilesize(ranges))
+        @inbounds for tile in TileIterator(ranges, tilesize(ranges))
             ($(map(first, input_ranges)...),) = tile
             $expr
         end
