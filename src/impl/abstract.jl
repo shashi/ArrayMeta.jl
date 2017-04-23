@@ -122,5 +122,5 @@ function tilesize(ranges)
 end
 
 @inline @generated function arrayop!{L,R,A<:AbstractArray}(::Type{A}, t::ArrayOp{L,R})
-    MacroTools.prettify(arrayop_body(:t, arraytype(L), t))
+    arrayop_body(:t, arraytype(L), t)
 end

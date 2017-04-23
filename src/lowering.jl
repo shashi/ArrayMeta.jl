@@ -94,6 +94,7 @@ function lower_indexing_and_maps(expr)
 end
 
 immutable AllocVar{sym} end # the output variable name
+arraytype{A<:AllocVar}(x::Type{A}) = A
 function lower_alloc_indexing(expr)
     @match expr begin
         A_[idx__] => :(ArrayMeta.Indexing(ArrayMeta.AllocVar{$(Expr(:quote, A))}(), ($(map(lower_index, idx)...),)))

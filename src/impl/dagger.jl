@@ -12,39 +12,78 @@ end
 
 
 function onchunks(X::Indexing)
-    # An iterator on the chunks
-    # TODO: handle IterConsts
-    let idx = X.idx
-        Indexing(map(delayed(x -> Indexing(x, idx)), chunks(X.array)), X.idx)
-    end
+    # TODO: handle IndexConsts
+    idx = X.idx
+    Indexing(map(delayed(x -> Indexing(x, idx)), chunks(X.array)), idx)
 end
 
 function onchunks(X::Map)
-    let f = X.f
-        Map(delayed((x...) -> Map(f, x)), map(onchunks, X.arrays))
-    end
-end
-
-
-function onchunks(itr::ArrayOp)
-    if !hasreduceddims(itr)
-        return ArrayOp(onchunks(itr.lhs), onchunks(itr.rhs))
-    end
-    let f = itr.reducefn
-        reducefn = delayed((a,b)->Map(f, (a, b)))
-        init = Thunk(()->error("Empty thunks won't be handled at the moment."))
-        ArrayOp(onchunks(itr.lhs), onchunks(itr.rhs), reducefn, init)
-    end
+    f = X.f
+    Map(delayed((x...) -> Map(f, x)), map(onchunks, X.arrays))
 end
 
 function arrayop!{D<:DArray}(::Type{D}, t::ArrayOp)
-    cs = arrayop!(onchunks(t))
-    L(x) = Indexing(x, t.lhs.idx)
-    t.lhs.array.result.chunks = map(delayed((l,r) -> arrayop!(ArrayOp(L(l), r, t.reducefn, t.empty))),
-                                    chunks(t.lhs.array), cs)
+    lhs = onchunks(t.lhs)
+    rhs = onchunks(t.rhs)
+
+    idx = t.lhs.idx
+    combine_chunks = delayed() do a, b
+        Map(t.reducefn, (a, b))
+    end
+    ct = ArrayOp(lhs, rhs, combine_chunks, delayed(()->nothing))
+    cs = arrayop_treereduce(ct)
+    f = delayed() do l, r
+        arrayop!(ArrayOp(l, r, t.reducefn, t.empty))
+    end
+    t.lhs.array.result.chunks = map(f, onchunks(t.lhs).array, cs)
     t.lhs.array
 end
 
+@generated function arrayop_treereduce{L,R,F,E}(op::ArrayOp{L,R,F,E})
+
+    rspaces = index_spaces(:(op.rhs), R)
+    lspaces = index_spaces(:(op.lhs), L)
+    expr = kernel_expr(:(op.rhs), R)
+
+    reduceddims = setdiff(keys(rspaces), keys(lspaces))
+    for sym in reduceddims
+        spaces = rspaces[sym]
+        T,dim,nm = first(spaces)
+        valx = gensym("valx")
+        valy = gensym("valy")
+        expr = quote
+            Dagger.treereduce(indices($nm, $dim)) do x, y
+                x, y
+                $sym = x
+
+                $valx = $expr
+                $sym = y
+                $valy = $expr
+                op.reducefn($valx, $valy)
+            end
+        end
+    end
+
+    lhs_expr = kernel_expr(:(op.lhs), L) # :() will be ignored
+    expr = :($lhs_expr = $expr)
+
+    checks = :()
+    for (sym, spaces) in lspaces
+        if length(spaces) > 1
+            # check dimensions for equality
+            equal_dims = [:(size($(d[3]), $(d[2]))) for d in spaces]
+            checks = :($checks; @assert allequal($(equal_dims...),))
+        end
+        T,dim,nm = first(spaces)
+        expr = quote
+            for $sym = indices($nm, $dim)
+                $expr
+            end
+        end
+    end
+
+    :($checks; $expr; op.lhs.array)
+end
 
 function Base.indices(x::DArray)
     Dagger.domainchunks(x.result)

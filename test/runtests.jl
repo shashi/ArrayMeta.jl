@@ -175,7 +175,7 @@ Base.:(==)(a::ArrayMeta.DArray, b::Array) = gather(a) == b
     @test @arrayop(_[i, j] := dX[i, j] + dy[i]) == X .+ y
     y = [1 2 3 4]
     dy = compute(Distribute(Blocks(1,2), y))
-    @test @arrayop(_[i, j] := dX[i, j] + dy[j]) == X .+ y
+    @test @arrayop(_[i, j] := dX[i, j] + dy[1, j]) == X .+ y
 
     # matmul
     @test @arrayop(_[i, j] := dX[i,k] * dY[k,j]) == X*Y
