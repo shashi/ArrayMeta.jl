@@ -22,7 +22,7 @@ function onchunks(X::Map)
     Map(delayed((x...) -> Map(f, x)), map(onchunks, X.arrays))
 end
 
-function arrayop!{D<:DArray}(::Type{D}, t::ArrayOp)
+function arrayop!{D<:DArray}(::Type{D}, t::Assign)
     lhs = onchunks(t.lhs)
     rhs = onchunks(t.rhs)
 
@@ -30,16 +30,16 @@ function arrayop!{D<:DArray}(::Type{D}, t::ArrayOp)
     combine_chunks = delayed() do a, b
         Map(t.reducefn, (a, b))
     end
-    ct = ArrayOp(lhs, rhs, combine_chunks, delayed(()->nothing))
+    ct = Assign(lhs, rhs, combine_chunks, delayed(()->nothing))
     cs = arrayop_treereduce(ct)
     f = delayed() do l, r
-        arrayop!(ArrayOp(l, r, t.reducefn, t.empty))
+        arrayop!(Assign(l, r, t.reducefn, t.empty))
     end
     t.lhs.array.result.chunks = map(f, onchunks(t.lhs).array, cs)
     t.lhs.array
 end
 
-@generated function arrayop_treereduce{L,R,F,E}(op::ArrayOp{L,R,F,E})
+@generated function arrayop_treereduce{L,R,F,E}(op::Assign{L,R,F,E})
 
     rspaces = index_spaces(:(op.rhs), R)
     lspaces = index_spaces(:(op.lhs), L)

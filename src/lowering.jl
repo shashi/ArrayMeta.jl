@@ -59,18 +59,18 @@ end
 
 eltype{T}(::Type{ConstArg{T}}) = T
 """
-`ArrayOp(lhs, rhs)`
+`Assign(lhs, rhs)`
 
 represents a tensor operation. `lhs` is an `Indexing` representing the LHS of the tensor expression
 `rhs` isa `Union{Indexing, Map}`
 """
-immutable ArrayOp{L<:Indexing,R,F,E}
+immutable Assign{L<:Indexing,R,F,E}
     lhs::L
     rhs::R
     reducefn::F
     empty::E
 end
-ArrayOp(lhs, rhs) = ArrayOp(lhs, rhs, +, nothing)
+Assign(lhs, rhs) = Assign(lhs, rhs, +, nothing)
 
 function lower_index(idx, only_symbols=false)
     if isa(idx, Symbol)
@@ -117,10 +117,10 @@ function lower(expr, reducefn, default=nothing)
     reduceddims = setdiff(flatten(last.(ridxs)), flatten(last.(lidxs)))
 
     if alloc
-        :(ArrayMeta.ArrayOp($(lower_alloc_indexing(lhs)), $rhs_lowered,
+        :(ArrayMeta.Assign($(lower_alloc_indexing(lhs)), $rhs_lowered,
                             $reducefn, $default))
     else
-        :(ArrayMeta.ArrayOp($(lower_indexing_and_maps(lhs)), $rhs_lowered,
+        :(ArrayMeta.Assign($(lower_indexing_and_maps(lhs)), $rhs_lowered,
                             $reducefn, $default))
     end
 end
@@ -130,7 +130,7 @@ macro lower(expr, reducefn=+, default=nothing)
 end
 
 """
-`arrayop!(t::ArrayOp)`
+`arrayop!(t::Assign)`
 
 Perform a tensor operation
 """
@@ -138,20 +138,20 @@ macro arrayop(expr, reducefn=+, default=nothing)
     :(ArrayMeta.arrayop!($(lower(expr, reducefn, default)))) |> esc
 end
 
-@inline function arrayop!{L,R}(t::ArrayOp{L,R})
+@inline function arrayop!{L,R}(t::Assign{L,R})
     arrayop!(arraytype(L), t)
 end
 
-function hasreduceddims{L,R,F,E}(op::Type{ArrayOp{L,R,F,E}})
+function hasreduceddims{L,R,F,E}(op::Type{Assign{L,R,F,E}})
     rspaces = index_spaces(:(rhs), R)
     lspaces = index_spaces(:(lhs), L)
     !isempty(setdiff(keys(rspaces), keys(lspaces)))
 end
-hasreduceddims(op::ArrayOp) = hasreduceddims(typeof(op))
+hasreduceddims(op::Assign) = hasreduceddims(typeof(op))
 
 # Kind of a hack,
 # this method is the allocating version of arrayop!
-@inline @generated function arrayop!{var, L,R}(::Type{AllocVar{var}}, t::ArrayOp{L,R})
+@inline @generated function arrayop!{var, L,R}(::Type{AllocVar{var}}, t::Assign{L,R})
 
     rspaces = index_spaces(:(t.rhs), R)
     lspaces = index_spaces(:(t.lhs), L)
@@ -191,7 +191,7 @@ hasreduceddims(op::ArrayOp) = hasreduceddims(typeof(op))
 
     quote
         $lhsarray
-        arrayop!(ArrayMeta.ArrayOp(Indexing(lhs, t.lhs.idx), t.rhs,
+        arrayop!(ArrayMeta.Assign(Indexing(lhs, t.lhs.idx), t.rhs,
                                    t.reducefn, t.empty))
     end
 end

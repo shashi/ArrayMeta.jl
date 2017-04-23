@@ -26,25 +26,25 @@ end
 end
 
 
-import ArrayMeta: @lower, ArrayOp
+import ArrayMeta: @lower, Assign
 
 @testset "Lower" begin
     A = rand(2,2); B = rand(2,2); C = rand(2,2);
     i, j, k = [IndexSym{x}() for x in [:i,:j,:k]]
     # map
-    @test @lower(A[i,j] = B[i,j]) == ArrayOp(Indexing(A, (i, j)), Indexing(B, (i, j)))
+    @test @lower(A[i,j] = B[i,j]) == Assign(Indexing(A, (i, j)), Indexing(B, (i, j)))
 
     # transpose
-    @test @lower(A[i,j] = B[j,i]) == ArrayOp(Indexing(A, (i, j)), Indexing(B, (j, i)))
+    @test @lower(A[i,j] = B[j,i]) == Assign(Indexing(A, (i, j)), Indexing(B, (j, i)))
 
     # reduced over i:
-    @test @lower(A[j] = B[j,i])   == ArrayOp(Indexing(A, (j,)), Indexing(B, (j, i)))
+    @test @lower(A[j] = B[j,i])   == Assign(Indexing(A, (j,)), Indexing(B, (j, i)))
 
     # reduced over i, output is reducedim
-    @test @lower(A[1,j] = B[i,j]) == ArrayOp(Indexing(A, (IndexConst{Int}(1), j)), Indexing(B, (i, j)))
+    @test @lower(A[1,j] = B[i,j]) == Assign(Indexing(A, (IndexConst{Int}(1), j)), Indexing(B, (i, j)))
 
     # reduce both dimensions, use * to reduce i and + to reduce j
-    @test @lower(A[1,1] = B[i,j], *) == ArrayOp(Indexing(A, (IndexConst{Int}(1), IndexConst{Int}(1))), Indexing(B, (i, j)), *, nothing)
+    @test @lower(A[1,1] = B[i,j], *) == Assign(Indexing(A, (IndexConst{Int}(1), IndexConst{Int}(1))), Indexing(B, (i, j)), *, nothing)
 end
 
 import ArrayMeta: index_spaces

@@ -29,7 +29,7 @@ function index_spaces{F, X}(name, itr::Type{Map{F, X}})
     merge_dictofvecs(inner...)
 end
 
-function index_spaces{L,R,F,E}(name, itr::Type{ArrayOp{L,R,F,E}})
+function index_spaces{L,R,F,E}(name, itr::Type{Assign{L,R,F,E}})
     merge_dictofvecs(index_spaces(:($name.lhs), L), index_spaces(:($name.rhs), R))
 end
 
@@ -70,7 +70,7 @@ function allequal(x, xs...)
 end
 
 function arrayop_body{A<:AbstractArray, L,R,F,E}(name, ::Type{A},
-                                                 op::Type{ArrayOp{L,R,F,E}})
+                                                 op::Type{Assign{L,R,F,E}})
 
     acc = kernel_expr(:($name.lhs), L) # :() will be ignored
     rhs_inner = kernel_expr(:($name.rhs), R)
@@ -121,6 +121,6 @@ function tilesize(ranges)
     map(x->16, ranges)
 end
 
-@inline @generated function arrayop!{L,R,A<:AbstractArray}(::Type{A}, t::ArrayOp{L,R})
+@inline @generated function arrayop!{L,R,A<:AbstractArray}(::Type{A}, t::Assign{L,R})
     arrayop_body(:t, arraytype(L), t)
 end
