@@ -4,18 +4,24 @@
 
 The abstractness (or lack thereof) of fallback implementations of array operations in Base Julia left me unsatisfied. Some of the problems we have:
 
-1. Fallback methods of array operations assume the presence of an efficient elementwise access (`getindex`) operation (either `IndexLinear` or `IndexCartesian`). It is hard to reconcile this abstraction for distributed / blocked arrays, resulting in DArray implementations having to wrap every operation on AbstractArray. Wrapping some of these operations is trivial (e.g. `map` and `reduce`) but some are not trivial to wrap (e.g. `reducedim`, `broadcast`). Further, the wrappers need to be constantly updated to keep in sync with Base's set of features.
-2. Operations often involve similar boiler plate code for dimensionality checks and reflection to find output array type and dimensions.
-3. Not all operations are optimized for memory locality, those that are have different implementations - thus leading to more complex code that need not exist.
+1. Fallback methods of array operations assume the presence of an efficient elementwise access (`getindex`) operation (either `IndexLinear` or `IndexCartesian`). It is hard to reconcile this abstraction for distributed / blocked arrays, resulting in DArray implementations having to wrap every operation on AbstractArray. Wrapping some of these operations is trivial (e.g. `map` and `reduce`) but some are not trivial to wrap (e.g. `reducedim`, `broadcast`). Further, the wrappers need to be constantly updated to keep in sync with Base's set of features, across Julia versions.
+2. Operations often involve similar boiler-plate code for dimensionality checks and reflection to find output array type and dimensions.
+3. Not all operations are optimized for memory locality, those that are have different implementations - thus leading to more complex code that strictly need not exist.
 
-This package aims to evolve the means available to express array operations at a higher level than currently possible.
+This package aims to evolve the means available to express array operations at a higher level than currently possible. The basic idea is if you get the general `@arrayop` case working for a new array type then the implementations of many array operations would fall out of it (see next section to learn about the `@arrayop` macro). `@arrayop` is also higher level than elementwise access, so distributed arrrays can implement it efficiently.
+
+Hypothetically, if the `@arrayop` macro was moved to Base and array operations in Base like `broadcast` and `reducedim` were implemented in Base using it, then
+
+1. We can delete a lot of array code from `Base` and replace them with much simpler `@arrayop` expressions
+2. Complex array types like `DArray`, for example, wouldn't have to wrap each operation, they just need to get `@arrayop` working once, and operations defined in Base will work for that array type.
+3. Make optimizations (like memory-locality) that may speed up many operations at once across the whole array ecosystem.
 
 ## The `@arrayop` macro
 
-The `@arrayop` macro can express array operations by denoting how the dimensions of the input array interact to produce dimensions of the output array. The notation is similar to [Einsten notation](https://en.wikipedia.org/wiki/Einstein_notation) (or its equivalent in [TensorOperations.jl](https://github.com/Jutho/TensorOperations.jl)) with some added features to support many more operations. By example,
+The `@arrayop` macro can express array operations by denoting how the dimensions of the input arrays interact to produce dimensions of the output array. The notation is similar to [Einsten notation](https://en.wikipedia.org/wiki/Einstein_notation) (or its equivalent in [TensorOperations.jl](https://github.com/Jutho/TensorOperations.jl)) with some added features to support more operations. The notation is best described by some examples:
 
 ```julia
-X = convert(Array, reshape(1:12, 4,3))
+X = collect(reshape(1:12, 4,3))
 Y = ones(3,4)
 
 # transpose (equivalent to X')
@@ -31,18 +37,20 @@ Y = ones(3,4)
 @arrayop Z[i,j] := X[i,j] + im * Y[j,i]
 
 # reduce (default +-reduce). Note: returns a 0-dimensional array
+# NOTE: any dimension that is left out in the LHS of the expression
+# is reduced as in Einsten notation. By default + is used as the reducer.
 @arrayop Z[] := X[i,j]
 
-# reduce with a user-specified function
-@arrayop Z[] := X[i,j] [i=>*, j=>*]
+# reduce with a user-specified function, * in this case.
+@arrayop Z[] := X[i,j] (*)
 
-# reducedim default (+)
+# reducedim (defaults reducer is +)
 @arrayop Z[1, j] := X[i,j] # equivalent to reducedim(+, X, 1)
 @arrayop Z[i, 1] := X[i,j] # equivalent to reducedim(+, X, 2)
 @arrayop Z[i] := X[i,j]    # equivalent to squeeze(reducedim(+, X, 2)) / APL-style reducedim
 
 # reducedim with a user-specified function
-@arrayop Z[1, j] := X[i,j] [i=>*]  # equivalent to prod(X, 1)
+@arrayop Z[1, j] := X[i,j] (*)  # equivalent to prod(X, 1)
 
 # broadcast
 y = [1, 2, 3, 4]
@@ -55,13 +63,13 @@ y = [1 2 3]
 @arrayop Z[i, j] := X[i, k] * Y[k, j]
 ```
 
-`@arrayop Z[i, j] = X[i,k] * Y[k,j]` works in-place (if `=` is used instead of `:=`) by overwriting `Z`.
+An expression like `@arrayop Z[i, j] = X[i,k] * Y[k,j]` works in-place (notice that `=` is used instead of `:=`) by overwriting `Z`.
 
-The same expressions currently [work on Dagger arrays](https://github.com/shashi/ArrayMeta.jl/blob/d1aced541e82de5021ed92ea72f29375b472c77c/test/runtests.jl#L165-L210).
+The same expressions currently work on both AbstractArrays and are specialized for efficiency to [work on Dagger arrays](https://github.com/shashi/ArrayMeta.jl/blob/d1aced541e82de5021ed92ea72f29375b472c77c/test/runtests.jl#L165-L210).
 
-The examples here are on 1 and 2 dimensional arrays but the notation generalizes to N dimensions.
+The examples here are on 1 and 2 dimensional arrays but the notation trivially generalizes to N dimensions.
 
-As an example of how this aids genericness, potentially, Base can define the `reducedim` function (for example) as:
+As an example of how this aids genericness, potentially, Base can define the `reducedim` (for example) function on an n-dimensional array as:
 
 
 ```julia
@@ -69,23 +77,23 @@ As an example of how this aids genericness, potentially, Base can define the `re
     idx_in  = Any[Symbol("i$n") for n=1:ndims(X)]
     idx_out = copy(idx_in)
     idx_out[dim] = 1
-    :(@arrayop _[$(idx_out...)] := X[$(idx_in...)] [$(idx_in[dim]) => $f])
+    :(@arrayop Y[$(idx_out...)] := X[$(idx_in...)], $f)
 end
 ```
 
-Allowing it to work on both AbstractArrays and in a specialized way on Dagger's arrays.
+Allowing it to work efficiently both on AbstractArrays and in a specialized way on Dagger's arrays (or another array which has a specialized implementation for `@arrayop`).
 
 ## How it works
 
 ### Step 1: Lowering an `@arrayop` expression to an intermediate form
 
-The `@arrayop <expr>` simply translates to `arrayop!(@lower <expr>)`. The goal of `@lower` is to lower the expression to type `ArrayOp` which contains an LHS and an RHS consisting of combination of `Indexing` and `Map` types.
+The `@arrayop <expr>` simply translates to `arrayop!(@lower <expr>)`. The goal of `@lower` is to lower the expression to type `Assign` which contains an LHS and an RHS consisting of combination of `Indexing` and `Map` types.
 
 - `A[i, j]` becomes `Indexing(A, IndexSym{:i}(), IndexSym{:j}())`
 - `A[i, 1]` becomes `Indexing(A, IndexSym{:i}(), IndexConst{Int}(1))`
 - `f(A[i, j])` becomes `Map(f, <lowering of A[i,j]>)`
-- `B[i] = f(A[i, j])` becomes `ArrayOp(<lowering of B[i]>, <lowering of f(A[i,j])>, +, reduction_identity(+, eltype(A)))` on the RHS, and `Indexing(B, IndexSym{:i}())` on LHS
-- `B[i] := f(A[i, j])` creates a similar `ArrayOp` but the LHS contains `Indexing(AllocVar{:B}, IndexSym{:i}())` denoting an output array (named `B`) should be allocated and then iterated.
+- `B[i] = f(A[i, j])` becomes `Assign(<lowering of B[i]>, <lowering of f(A[i,j])>, +, reduction_identity(+, eltype(A)))` on the RHS, and `Indexing(B, IndexSym{:i}())` on LHS
+- `B[i] := f(A[i, j])` creates a similar `Assign` but the LHS contains `Indexing(AllocVar{:B}, IndexSym{:i}())` denoting an output array (named `B`) should be allocated and then iterated.
 
 You can try out a few expressions with the `@lower` macro to see how they get lowered. These types for representing the lowered form of the expression are parameterized by the types of all their arguments allowing functions in the next steps to dispatch on and generate efficient code tailored to the specific expression and specific array types.
 
@@ -103,10 +111,9 @@ The task of `arrayop!` is to act as a generated function which returns the code 
 
 Although the prototype works the performance of `@arrayop` is far from optimal. These work items mainly deal with the performance:
 
+- Dispatch to `BLAS.gemm!` where possible.
 - Loop reordering
-- Blocked iteration to optimize for memory-locality
-- Tree reduce on chunks in Dagger
-- Splitting up a large `ArrayOp` into composition of smaller operations to reduce communication costs in Dagger arrays. (e.g. Inner product can depend on half the number of chunks)
+- Communication / computation time optimizations in Dagger a la [Tensor Contraction Engine](http://www.csc.lsu.edu/~gb/TCE/)
 
 ### Researchy things
 
