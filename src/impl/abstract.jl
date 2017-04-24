@@ -1,5 +1,16 @@
+using Base.Threads
 
 using TiledIteration
+
+function split_range{T}(range::Range{T}, n)
+    len = length(range)
+
+    starts = len >= n ?
+        round(T, linspace(first(range), last(range)+1, n+1)) :
+        [[first(range):(last(range)+1);], zeros(T, n-len);]
+
+    map((x,y)->x:y, starts[1:end-1], starts[2:end] .- 1)
+end
 
 ### Construction of loop expressions in type domain
 ### This is the fallback implementation for AbstractArrays
@@ -42,7 +53,7 @@ function arrayop_body{A<:AbstractArray, L,R,F,E}(name, ::Type{A},
 
     expr = quote
         full_ranges = ($(map(last, input_ranges)...),)
-        @show thread_ranges = map(x->split_range(x, nthreads()), full_ranges)
+        thread_ranges = map(x->split_range(x, nthreads()), full_ranges)
         for ranges in collect(zip(thread_ranges...))
             @inbounds for tile in TileIterator(ranges, tilesize(ranges))
                 ($(map(first, input_ranges)...),) = tile
