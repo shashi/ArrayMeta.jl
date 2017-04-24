@@ -1,6 +1,3 @@
-@inline @generated function arrayop!{L,R,A<:AbstractArray}(::Type{A}, t::Assign{L,R})
-    arrayop_body(:t, arraytype(L), t)
-end
 
 using TiledIteration
 
@@ -58,43 +55,6 @@ end
 # Keys:  indexing symbol
 # Value: a list of (array type, dimension, expr) tuples which correspond to that
 #        indexing symbol
-function index_spaces{X,Idx}(name, itr::Type{Indexing{X, Idx}})
-    idx_spaces = Dict()
-
-    for (dim, idx) in enumerate(Idx.parameters)
-        j = indexing_expr(name, idx, dim)
-        if isa(j, Symbol)
-            # store mapping from index symbol to "index space" of arrays
-            # being iterated over
-            Base.@get! idx_spaces j []
-            push!(idx_spaces[j], (X, dim, :($name.array)))
-        end
-    end
-
-    idx_spaces
-end
-
-indexing_expr{x}(name, ::Type{IndexSym{x}}, i) = x
-indexing_expr{C<:IndexConst}(name, ::Type{C}, i) = :($name.idx[$i].val)
-
-function index_spaces{F, X}(name, itr::Type{Map{F, X}})
-    inner = [index_spaces(:($name.arrays[$i]), idx)
-             for (i, idx) in enumerate(X.parameters)]
-    merge_dictofvecs(inner...)
-end
-
-function index_spaces{L,R,F,E}(name, itr::Type{Assign{L,R,F,E}})
-    merge_dictofvecs(index_spaces(:($name.lhs), L), index_spaces(:($name.rhs), R))
-end
-
-function index_space_iterator{A<:AbstractArray}(T::Type{A}, dimension, name)
-    :(1:size($name, $dimension))
-end
-
-function get_subscripts{X,Idx}(name, itr::Type{Indexing{X, Idx}})
-    [indexing_expr(name, idx, i) for (i, idx) in  enumerate(Idx.parameters)]
-end
-
 # Generate the expression corresponding to a type
 function kernel_expr(name, itr)
     kernel_expr(name, arraytype(itr), itr)
@@ -122,4 +82,8 @@ end
 
 function tilesize(ranges)
     map(x->16, ranges)
+end
+
+@inline @generated function arrayop!{L,R,A<:AbstractArray}(::Type{A}, t::Assign{L,R})
+    arrayop_body(:t, arraytype(L), t)
 end
