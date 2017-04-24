@@ -8,17 +8,17 @@ The abstractness (or lack thereof) of fallback implementations of array operatio
 2. Operations often involve similar boiler-plate code for dimensionality checks and reflection to find output array type and dimensions.
 3. Not all operations are optimized for memory locality, those that are have different implementations - thus leading to more complex code that strictly need not exist.
 
-This package aims to evolve the means available to express array operations at a higher level than currently possible. The basic idea is if you get the general `@arrayop` case working for a new array type then the implementations of many array operations would fall out of it (see next section to learn about the `@arrayop` macro). `@arrayop` is also higher level than elementwise access, so distributed arrrays can implement it efficiently.
+This package aims to evolve the means available to express array operations at a higher level than currently possible. The basic idea is if you get the general `@arrayop` case working for a new array type then the implementations of many array operations would fall out of it (see [next section](#the-arrayop-macro) to learn about the `@arrayop` macro). `@arrayop` is also higher level than elementwise access, so distributed arrrays can implement it efficiently.
 
 Hypothetically, if the `@arrayop` macro was moved to Base and array operations in Base like `broadcast` and `reducedim` were implemented in Base using it, then
 
 1. We can delete a lot of array code from `Base` and replace them with much simpler `@arrayop` expressions
-2. Complex array types like `DArray`, for example, wouldn't have to wrap each operation, they just need to get `@arrayop` working once, and operations defined in Base will work for that array type.
+2. Complex array types like `DArray`, for example, wouldn't have to wrap each operation, they just need to get `@arrayop` working once, and operations defined in Base will work for that array type. (This package has a Dagger.jl array implementation as an example of this.)
 3. Make optimizations (like multi-threading, memory-locality) that may speed up many operations at once across the whole array ecosystem.
 
 ## The `@arrayop` macro
 
-The `@arrayop` macro can express array operations by denoting how the dimensions of the input arrays interact to produce dimensions of the output array. The notation is similar to [Einsten notation](https://en.wikipedia.org/wiki/Einstein_notation) (or its equivalent in [TensorOperations.jl](https://github.com/Jutho/TensorOperations.jl)) with some added features to support more operations. The notation is best described by some examples:
+The `@arrayop` macro can express array operations by denoting how the dimensions of the input arrays interact to produce dimensions of the output array. The notation is similar to [Einsten notation](https://en.wikipedia.org/wiki/Einstein_notation) (or its equivalent in [TensorOperations.jl](https://github.com/Jutho/TensorOperations.jl) see [below](#differences-with-tensoroperationsjl) for a comparison) with some added features to support more operations. The notation is best described by some examples:
 
 ```julia
 X = collect(reshape(1:12, 4,3))
@@ -63,14 +63,15 @@ y = [1 2 3]
 @arrayop Z[i, j] := X[i, k] * Y[k, j]
 ```
 
-An expression like `@arrayop Z[i, j] = X[i,k] * Y[k,j]` works in-place (notice that `=` is used instead of `:=`) by overwriting `Z`.
+Note that these expressions generate the `for`-loops to perform the required operation. They can hence be used to implement the array operations noted in the comments.
+
+An expression like `@arrayop Z[i, j] = X[i,k] * Y[k,j]` works in-place by overwriting `Z` (notice that `=` is used instead of `:=`).
 
 The same expressions currently work on both AbstractArrays and are specialized for efficiency to [work on Dagger arrays](https://github.com/shashi/ArrayMeta.jl/blob/d1aced541e82de5021ed92ea72f29375b472c77c/test/runtests.jl#L165-L210).
 
 The examples here are on 1 and 2 dimensional arrays but the notation trivially generalizes to N dimensions.
 
 As an example of how this aids genericness, potentially, Base can define the `reducedim` (for example) function on an n-dimensional array as:
-
 
 ```julia
 @generated function reducedim{dim}(f, X::AbstractArray, ::Val{dim})
@@ -98,7 +99,6 @@ julia> @btime permutedims(x, (3,2,1));
 ```
 
 Presumably the Base `permutedims` doesn't make efforts to block the inputs, leading to many more cache misses than the `@arrayop` version.
-
 
 ```julia
 julia> @btime A+A';
@@ -150,3 +150,16 @@ The task of `arrayop!` is to act as a generated function which returns the code 
   - mapslices
   - getindex
   - stencils
+
+## Differences with [TensorOperations.jl](https://github.com/Jutho/TensorOperations.jl)
+
+Jutho's TensorOperations.jl has inspired this package a whole lot. However, its codebase is tailored to work specifically on tensors of real and complex numbers, their contraction, transposition, conjugation and multiplication with scalars and it does that very well. This package aims to cover all of those features in a more general framework. Notable additions:
+
+- Works on arrays of any type
+- You can use any Julia function for combining arrays and reducing dimensions, and any constants as arguments (as opposed to allowing only scalar multiplication or offsets)
+- Supports indexing where some dimensions can be constants, as in:
+```julia
+@arrayop y[1, j] := x[i, j]
+```
+to support operations like `reducedim`.
+- Finally, it has a dispatch system to pick different implementations for different array types. `Dagger` array operations have been implemented as an example.
