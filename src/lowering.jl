@@ -142,12 +142,45 @@ end
     arrayop!(arraytype(L), t)
 end
 
+function index_spaces{X,Idx}(name, itr::Type{Indexing{X, Idx}})
+    idx_spaces = Dict()
+
+    for (dim, idx) in enumerate(Idx.parameters)
+        j = indexing_expr(name, idx, dim)
+        if isa(j, Symbol)
+            # store mapping from index symbol to "index space" of arrays
+            # being iterated over
+            Base.@get! idx_spaces j []
+            push!(idx_spaces[j], (X, dim, :($name.array)))
+        end
+    end
+
+    idx_spaces
+end
+
+indexing_expr{x}(name, ::Type{IndexSym{x}}, i) = x
+indexing_expr{C<:IndexConst}(name, ::Type{C}, i) = :($name.idx[$i].val)
+
+function index_spaces{F, X}(name, itr::Type{Map{F, X}})
+    inner = [index_spaces(:($name.arrays[$i]), idx)
+             for (i, idx) in enumerate(X.parameters)]
+    merge_dictofvecs(inner...)
+end
+
+function index_spaces{L,R,F,E}(name, itr::Type{Assign{L,R,F,E}})
+    merge_dictofvecs(index_spaces(:($name.lhs), L), index_spaces(:($name.rhs), R))
+end
+
 function hasreduceddims{L,R,F,E}(op::Type{Assign{L,R,F,E}})
     rspaces = index_spaces(:(rhs), R)
     lspaces = index_spaces(:(lhs), L)
     !isempty(setdiff(keys(rspaces), keys(lspaces)))
 end
 hasreduceddims(op::Assign) = hasreduceddims(typeof(op))
+
+function get_subscripts{X,Idx}(name, itr::Type{Indexing{X, Idx}})
+    [indexing_expr(name, idx, i) for (i, idx) in  enumerate(Idx.parameters)]
+end
 
 # Kind of a hack,
 # this method is the allocating version of arrayop!
