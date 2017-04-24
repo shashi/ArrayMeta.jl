@@ -14,7 +14,7 @@ Hypothetically, if the `@arrayop` macro was moved to Base and array operations i
 
 1. We can delete a lot of array code from `Base` and replace them with much simpler `@arrayop` expressions
 2. Complex array types like `DArray`, for example, wouldn't have to wrap each operation, they just need to get `@arrayop` working once, and operations defined in Base will work for that array type.
-3. Make optimizations (like memory-locality) that may speed up many operations at once across the whole array ecosystem.
+3. Make optimizations (like multi-threading, memory-locality) that may speed up many operations at once across the whole array ecosystem.
 
 ## The `@arrayop` macro
 
@@ -83,6 +83,32 @@ end
 
 Allowing it to work efficiently both on AbstractArrays and in a specialized way on Dagger's arrays (or another array which has a specialized implementation for `@arrayop`).
 
+## Blocked iteration
+
+`@arrayop` uses [TiledIteration.jl](https://github.com/JuliaArrays/TiledIteration.jl) to perform operations in cache-efficient way. As a demo of this, consider a 3-dimensional `permutedims`:
+
+```julia
+julia> x = rand(128,128,128);
+
+julia> @btime @arrayop y[i,j,k] := x[k,j,i];
+  4.871 ms (16 allocations: 16.00 MiB)
+
+julia> @btime permutedims(x, (3,2,1));
+  23.611 ms (10 allocations: 16.00 MiB)
+```
+
+Presumably the Base `permutedims` doesn't make efforts to block the inputs, leading to many more cache misses than the `@arrayop` version.
+
+
+```julia
+julia> @btime A+A';
+  3.752 ms (6 allocations: 15.26 MiB)
+julia> @btime @arrayop _[i, j] := A[i,j] + A[j,i];
+  2.607 ms (22 allocations: 7.63 MiB)
+```
+
+This might open up opportunities to syntactically rewrite things like `A+A'` to `@arrayop _[i,j] = A[i,j] + A[j,i]` which is faster and allocates no temporaries. This also should speed up operations on `PermuteDimsArray`.
+
 ## How it works
 
 ### Step 1: Lowering an `@arrayop` expression to an intermediate form
@@ -109,10 +135,9 @@ The task of `arrayop!` is to act as a generated function which returns the code 
 
 ### Already practical things
 
-Although the prototype works the performance of `@arrayop` is far from optimal. These work items mainly deal with the performance:
-
 - Dispatch to `BLAS.gemm!` where possible.
-- Loop reordering
+- Loop reordering (it does give some improvements although we do blocked iteration)
+- Optimizations for PermuteDimsArray
 - Communication / computation time optimizations in Dagger a la [Tensor Contraction Engine](http://www.csc.lsu.edu/~gb/TCE/)
 
 ### Researchy things
