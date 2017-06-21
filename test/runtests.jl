@@ -132,7 +132,7 @@ import ArrayMeta: @arrayop
     @test @arrayop(_[i, j] := X[i,k] * Y[k,j]) == X*Y
 end
 
-Base.:(==)(a::ArrayMeta.DArray, b::Array) = gather(a) == b
+Base.:(==)(a::ArrayMeta.DArray, b::Array) = collect(a) == b
 
 @testset "@arrayop - Dagger" begin
     X = convert(Array, reshape(1:16, 4,4))
@@ -157,10 +157,10 @@ Base.:(==)(a::ArrayMeta.DArray, b::Array) = gather(a) == b
     #@test @arrayop(_[] := 2 * X[i,j])[] == sum(2.*X)
 
     # reduce default (+)
-    @test gather(@arrayop(_[1,1] := dX[i,j])) |> first == sum(X)
+    @test collect(@arrayop(_[1,1] := dX[i,j])) |> first == sum(X)
 
     # reduce with function
-    @test gather(@arrayop(_[1,1] := dX[i,j], *)) |> first == prod(X)
+    @test collect(@arrayop(_[1,1] := dX[i,j], *)) |> first == prod(X)
 
     # reducedim default (+)
     @test @arrayop(_[1, j] := dX[i,j]) == sum(X, 1)
@@ -175,8 +175,8 @@ Base.:(==)(a::ArrayMeta.DArray, b::Array) = gather(a) == b
     @test @arrayop(_[i, j] := dX[i, j] + dy[i]) == X .+ y
     y = [1 2 3 4]
     dy = compute(Distribute(Blocks(1,2), y))
-    @test @arrayop(_[i, j] := dX[i, j] + dy[1, j]) == X .+ y
+    @test @arrayop(_[i, j] := dX[i, j] + dy[1, j], (+), 0.0) == X .+ y
 
     # matmul
-    @test @arrayop(_[i, j] := dX[i,k] * dY[k,j]) == X*Y
+    @test @arrayop(_[i, j] := dX[i,k] * dY[k,j], (+), 0.0) == X*Y
 end

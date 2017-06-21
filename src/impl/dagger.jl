@@ -1,14 +1,7 @@
 using Dagger
 import Dagger:DomainBlocks
 
-# ugliness management
-const DArray = Dagger.ComputedArray
-
-import Dagger.chunks
-function chunks(arr::DArray)
-    chunks(arr.result)
-end
-# /ugliness
+import Dagger: DArray, chunks
 
 
 function onchunks(X::Indexing)
@@ -35,7 +28,7 @@ function arrayop!{D<:DArray}(::Type{D}, t::Assign)
     f = delayed() do l, r
         arrayop!(Assign(l, r, t.reducefn, t.empty))
     end
-    t.lhs.array.result.chunks = map(f, onchunks(t.lhs).array, cs)
+    t.lhs.array.chunks = map(f, onchunks(t.lhs).array, cs)
     t.lhs.array
 end
 
@@ -86,7 +79,7 @@ end
 end
 
 function Base.indices(x::DArray)
-    Dagger.domainchunks(x.result)
+    Dagger.domainchunks(x)
 end
 
 function Base.indices(x::DArray, i)
@@ -102,5 +95,5 @@ function allocarray{T,N}(::Type{DArray{T,N}}, default, idxs...)
     chnks = map(delayed(subd -> allocarray(Array{T,1}, default, size(subd))), dmnchunks)
     sz = map((x,y)->x-y+1, map(last, dmnchunks.cumlength), dmnchunks.start)
     dmn = ArrayDomain(map(x->1:x, sz))
-    DArray(Dagger.Cat(Array{T, length(idxs)}, dmn, dmnchunks, chnks))
+    DArray{T, length(idxs)}(dmn, dmnchunks, chnks)
 end
