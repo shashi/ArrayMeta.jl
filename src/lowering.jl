@@ -79,6 +79,10 @@ function lower_index(idx, only_symbols=false)
         if only_symbols
             throw(ArgumentError("Got $idx instead of a symbol"))
         end
+        if isa(idx, Expr) && idx.head == :$
+            idx = idx.args[1]
+        end
+
         :(ArrayMeta.IndexConst($idx))
     end
 end
