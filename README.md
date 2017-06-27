@@ -18,7 +18,7 @@ Hypothetically, if the `@arrayop` macro was moved to Base and array operations i
 
 ## The `@arrayop` macro
 
-The `@arrayop` macro can express array operations by denoting how the dimensions of the input arrays interact to produce dimensions of the output array. The notation is similar to [Einsten notation](https://en.wikipedia.org/wiki/Einstein_notation) (or its equivalent in [TensorOperations.jl](https://github.com/Jutho/TensorOperations.jl) see [below](#differences-with-tensoroperationsjl) for a comparison) with some added features to support more operations. The notation is best described by some examples:
+The `@arrayop` macro can express array operations by denoting how the dimensions of the input arrays interact to produce dimensions of the output array. The notation is similar to [Einstein notation](https://en.wikipedia.org/wiki/Einstein_notation) (or its equivalent in [TensorOperations.jl](https://github.com/Jutho/TensorOperations.jl) see [below](#differences-with-tensoroperationsjl) for a comparison) with some added features to support more operations. The notation is best described by some examples:
 
 ```julia
 X = collect(reshape(1:12, 4,3))
